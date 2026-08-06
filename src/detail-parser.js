@@ -1,4 +1,4 @@
-import { CHECK_STATES, MERGE_STATES, REVIEW_STATES } from "./constants.js";
+import { CHECK_STATES, GITHUB_ORIGIN, MERGE_STATES, REVIEW_STATES } from "./constants.js";
 import { safeJsonParse } from "./utils.js";
 
 function normalizeReviewState(value) {
@@ -177,7 +177,8 @@ export function parsePrDetailDocument(doc) {
   return mergeNativeDetails(embedded, dom);
 }
 
-export function findDeferredStatusEndpoint(doc, baseUrl = "https://github.com") {
+export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
+  const baseOrigin = new URL(baseUrl, GITHUB_ORIGIN).origin;
   const candidateAttributes = [
     "data-status-details-url",
     "data-checks-status-url",
@@ -197,7 +198,7 @@ export function findDeferredStatusEndpoint(doc, baseUrl = "https://github.com") 
         continue;
       }
       const resolved = new URL(value, baseUrl).href;
-      if (new URL(resolved).origin === "https://github.com") {
+      if (new URL(resolved).origin === baseOrigin) {
         return resolved;
       }
     }
@@ -205,11 +206,13 @@ export function findDeferredStatusEndpoint(doc, baseUrl = "https://github.com") 
 
   for (const script of doc.querySelectorAll("script")) {
     const text = script.textContent || "";
-    const match = text.match(
-      /https:\/\/github\.com\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/
-    );
-    if (match) {
-      return match[0];
+    const matches = text.match(
+      /https?:\/\/[^"'\\s]+\/[^"'\\s]+\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/g
+    ) || [];
+    for (const match of matches) {
+      if (new URL(match).origin === baseOrigin) {
+        return match;
+      }
     }
   }
 

@@ -1,6 +1,6 @@
 import { DETAIL_CACHE_TTL_MS, DETAIL_PARSER_VERSION, DEFAULT_RECORD } from "./constants.js";
 import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "./detail-parser.js";
-import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl } from "./github.js";
+import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl, trackerSearchUrl } from "./github.js";
 import { filterSummaries, normalizeTags } from "./models.js";
 import { styles } from "./styles.js";
 import { createUi } from "./ui.js";
@@ -212,7 +212,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       const detailCache = { ...(snapshot.detailCache || {}) };
 
       try {
-        const summaries = await fetchOpenPrs({ fetchImpl, parser });
+        const summaries = await fetchOpenPrs({ fetchImpl, parser, startUrl: trackerSearchUrl(login) });
         const enriched = await mapLimit(summaries, 4, async (summary) => {
           try {
             const cached = detailCache[summary.key];

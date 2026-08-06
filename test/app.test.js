@@ -71,7 +71,7 @@ test("handleRoute only auto-refreshes once per route entry", async () => {
     dom,
     storage,
     fetchImpl: async (url) => {
-      if (String(url).includes("/search")) {
+      if (String(url).includes("/pulls")) {
         pullFetches += 1;
         return { ok: true, text: async () => "<html><body></body></html>" };
       }
@@ -94,7 +94,7 @@ test("search and notes keep focus and value across updates", async () => {
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -104,7 +104,7 @@ test("search and notes keep focus and value across updates", async () => {
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/search")
+        String(url).includes("/pulls")
           ? pullsHtml([{ href: "/acme/api/pull/1", title: "Fix CI", draft: false }])
           : "<html><body></body></html>"
     })
@@ -142,8 +142,8 @@ test("pending edits stay keyed to the correct PR and flush on close", async () =
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.com/acme/api/pull/2", draft: false }
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
       ]
     },
     detailCache: {}
@@ -154,7 +154,7 @@ test("pending edits stay keyed to the correct PR and flush on close", async () =
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/search")
+        String(url).includes("/pulls")
           ? pullsHtml([
               { href: "/acme/api/pull/1", title: "One", draft: false },
               { href: "/acme/api/pull/2", title: "Two", draft: false }
@@ -182,7 +182,7 @@ test("pending edits stay keyed to the correct PR and flush on close", async () =
 });
 
 test("refresh preserves concurrent personal edits made during fetch", async () => {
-  const dom = makeDom("https://github.com/pulls");
+  const dom = makeDom("https://github.toasttab.com/pulls");
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {
@@ -199,7 +199,7 @@ test("refresh preserves concurrent personal edits made during fetch", async () =
     dom,
     storage,
     fetchImpl: async (url) => {
-      if (String(url).includes("/search")) {
+      if (String(url).includes("/pulls")) {
         await gate;
         return {
           ok: true,
@@ -231,7 +231,7 @@ test("detail refresh merges deferred fields and preserves list draft flag", asyn
     storage,
     fetchImpl: async (url) => {
       const value = String(url);
-      if (value.includes("/search")) {
+      if (value.includes("/pulls")) {
         return {
           ok: true,
           text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: true }])
@@ -268,7 +268,7 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -278,7 +278,7 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/search")
+        String(url).includes("/pulls")
           ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
           : "<html><body></body></html>"
     })
@@ -301,7 +301,7 @@ test("personal status can be changed directly from a PR row", async () => {
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -311,7 +311,7 @@ test("personal status can be changed directly from a PR row", async () => {
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/search")
+        String(url).includes("/pulls")
           ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
           : "<html><body></body></html>"
     })
@@ -372,7 +372,7 @@ test("awaited export flush includes the latest pending note", async () => {
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -382,7 +382,7 @@ test("awaited export flush includes the latest pending note", async () => {
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/search")
+        String(url).includes("/pulls")
           ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
           : "<html><body></body></html>"
     })

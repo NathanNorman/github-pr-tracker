@@ -1,7 +1,8 @@
+import { GITHUB_ORIGIN } from "./constants.js";
 import { parsePrUrl } from "./models.js";
 
 export function isTrackerRoute(location) {
-  const url = typeof location === "string" ? new URL(location, "https://github.com") : new URL(location.href);
+  const url = typeof location === "string" ? new URL(location, GITHUB_ORIGIN) : new URL(location.href);
   const isPullsRoute = url.pathname === "/pulls" || url.pathname === "/pulls/inbox";
   const hasTrackerMarker = url.hash === "#pr-tracker" || url.searchParams.get("pr_tracker") === "1";
   return isPullsRoute && hasTrackerMarker;
@@ -57,7 +58,7 @@ export function ensureTrackerNav(doc = document) {
   }
 }
 
-export function parsePullListDocument(doc, origin = "https://github.com") {
+export function parsePullListDocument(doc, origin = GITHUB_ORIGIN) {
   const grouped = new Map();
   for (const anchor of doc.querySelectorAll('a[href*="/pull/"]')) {
     const href = anchor.getAttribute("href");
@@ -143,14 +144,16 @@ export async function fetchOpenPrs({ fetchImpl, parser, startUrl = trackerSearch
   return allItems;
 }
 
-export function trackerSearchUrl() {
-  return "https://github.com/search?q=is%3Aopen+is%3Apr+author%3A%40me&type=pullrequests";
+export function trackerSearchUrl(login = "@me") {
+  const url = new URL("/pulls", GITHUB_ORIGIN);
+  url.searchParams.set("q", `is:open is:pr archived:false author:${login || "@me"}`);
+  return url.href;
 }
 
 export function isSameOriginGitHubUrl(value) {
   try {
-    const url = new URL(value, "https://github.com");
-    return url.origin === "https://github.com";
+    const url = new URL(value, GITHUB_ORIGIN);
+    return url.origin === GITHUB_ORIGIN;
   } catch {
     return false;
   }

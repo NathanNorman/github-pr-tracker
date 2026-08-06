@@ -1,4 +1,5 @@
 export const APP_ID = "tm-github-pr-tracker";
+export const GITHUB_ORIGIN = "https://github.toasttab.com";
 export const SCHEMA_VERSION = 1;
 export const DETAIL_CACHE_TTL_MS = 10 * 60 * 1000;
 export const DETAIL_PARSER_VERSION = 2;

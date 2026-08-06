@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.2.0
-// @description  Personal pull request tracker for your own open GitHub PRs.
+// @version      1.2.1
+// @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
 // @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js
-// @match        https://github.com/pulls*
+// @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
@@ -18,6 +18,7 @@
 (() => {
   // src/constants.js
   var APP_ID = "tm-github-pr-tracker";
+  var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
   var DETAIL_PARSER_VERSION = 2;
@@ -270,7 +271,8 @@
     const dom = detailFromDom(doc);
     return mergeNativeDetails(embedded, dom);
   }
-  function findDeferredStatusEndpoint(doc, baseUrl = "https://github.com") {
+  function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
+    const baseOrigin = new URL(baseUrl, GITHUB_ORIGIN).origin;
     const candidateAttributes = [
       "data-status-details-url",
       "data-checks-status-url",
@@ -286,18 +288,20 @@
           continue;
         }
         const resolved = new URL(value, baseUrl).href;
-        if (new URL(resolved).origin === "https://github.com") {
+        if (new URL(resolved).origin === baseOrigin) {
           return resolved;
         }
       }
     }
     for (const script of doc.querySelectorAll("script")) {
       const text = script.textContent || "";
-      const match = text.match(
-        /https:\/\/github\.com\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/
-      );
-      if (match) {
-        return match[0];
+      const matches = text.match(
+        /https?:\/\/[^"'\\s]+\/[^"'\\s]+\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/g
+      ) || [];
+      for (const match of matches) {
+        if (new URL(match).origin === baseOrigin) {
+          return match;
+        }
       }
     }
     return null;
@@ -343,7 +347,7 @@
     return `${owner}/${repo}#${number}`;
   }
   function parsePrUrl(input) {
-    const url = new URL(input, "https://github.com");
+    const url = new URL(input, GITHUB_ORIGIN);
     const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/);
     if (!match) {
       return null;
@@ -354,7 +358,7 @@
       repo,
       number: Number(number),
       key: createPrKey(owner, repo, Number(number)),
-      url: `https://github.com/${owner}/${repo}/pull/${number}`
+      url: `${url.origin}/${owner}/${repo}/pull/${number}`
     };
   }
   function normalizeTag(rawTag) {
@@ -478,7 +482,7 @@
 
   // src/github.js
   function isTrackerRoute(location) {
-    const url = typeof location === "string" ? new URL(location, "https://github.com") : new URL(location.href);
+    const url = typeof location === "string" ? new URL(location, GITHUB_ORIGIN) : new URL(location.href);
     const isPullsRoute = url.pathname === "/pulls" || url.pathname === "/pulls/inbox";
     const hasTrackerMarker = url.hash === "#pr-tracker" || url.searchParams.get("pr_tracker") === "1";
     return isPullsRoute && hasTrackerMarker;
@@ -525,7 +529,7 @@
       container.append(link);
     }
   }
-  function parsePullListDocument(doc, origin = "https://github.com") {
+  function parsePullListDocument(doc, origin = GITHUB_ORIGIN) {
     const grouped = /* @__PURE__ */ new Map();
     for (const anchor of doc.querySelectorAll('a[href*="/pull/"]')) {
       const href = anchor.getAttribute("href");
@@ -602,13 +606,15 @@
     }
     return allItems;
   }
-  function trackerSearchUrl() {
-    return "https://github.com/search?q=is%3Aopen+is%3Apr+author%3A%40me&type=pullrequests";
+  function trackerSearchUrl(login = "@me") {
+    const url = new URL("/pulls", GITHUB_ORIGIN);
+    url.searchParams.set("q", `is:open is:pr archived:false author:${login || "@me"}`);
+    return url.href;
   }
   function isSameOriginGitHubUrl(value) {
     try {
-      const url = new URL(value, "https://github.com");
-      return url.origin === "https://github.com";
+      const url = new URL(value, GITHUB_ORIGIN);
+      return url.origin === GITHUB_ORIGIN;
     } catch {
       return false;
     }
@@ -2018,7 +2024,7 @@ select {
         const cachedItems = snapshot.openListCache.items || [];
         const detailCache = { ...snapshot.detailCache || {} };
         try {
-          const summaries = await fetchOpenPrs({ fetchImpl, parser });
+          const summaries = await fetchOpenPrs({ fetchImpl, parser, startUrl: trackerSearchUrl(login) });
           const enriched = await mapLimit(summaries, 4, async (summary) => {
             try {
               const cached = detailCache[summary.key];

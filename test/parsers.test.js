@@ -23,8 +23,8 @@ test("parsePullListDocument groups duplicate links and ignores cross-origin pagi
 
 test("fetchOpenPrs follows unique same-origin pagination links", async () => {
   const pages = new Map([
-    ["https://github.com/search?q=is%3Aopen+is%3Apr+author%3A%40me&type=pullrequests", await fixture("pulls-page1.html")],
-    ["https://github.com/pulls?page=2", await fixture("pulls-page2.html")]
+    ["https://github.toasttab.com/pulls?q=is%3Aopen+is%3Apr+archived%3Afalse+author%3A%40me", await fixture("pulls-page1.html")],
+    ["https://github.toasttab.com/pulls?page=2", await fixture("pulls-page2.html")]
   ]);
   const summaries = await fetchOpenPrs({
     fetchImpl: async (url) => ({ ok: true, text: async () => pages.get(url) }),
@@ -34,12 +34,12 @@ test("fetchOpenPrs follows unique same-origin pagination links", async () => {
 });
 
 test("parsePrUrl parses stable key", () => {
-  assert.deepEqual(parsePrUrl("https://github.com/acme/api/pull/12/files"), {
+  assert.deepEqual(parsePrUrl("https://github.toasttab.com/acme/api/pull/12/files"), {
     owner: "acme",
     repo: "api",
     number: 12,
     key: "acme/api#12",
-    url: "https://github.com/acme/api/pull/12"
+    url: "https://github.toasttab.com/acme/api/pull/12"
   });
 });
 
@@ -74,7 +74,7 @@ test("detail parser stays unknown for historical timeline text", async () => {
 });
 
 test("detail parser reads GitHub's current embedded draft and reviewer sidebar", async () => {
-  const doc = parseHtml(await fixture("detail-current-github.html"), "https://github.com/acme/api/pull/12");
+  const doc = parseHtml(await fixture("detail-current-github.html"), "https://github.toasttab.com/acme/api/pull/12");
   assert.deepEqual(parsePrDetailDocument(doc), {
     review: "changes_requested",
     checks: "unknown",
@@ -82,8 +82,8 @@ test("detail parser reads GitHub's current embedded draft and reviewer sidebar",
     draft: true
   });
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.com/acme/api/pull/12"),
-    "https://github.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
+    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"),
+    "https://github.toasttab.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
   );
 });
 
@@ -154,8 +154,8 @@ test("semantic DOM merge parsing prefers conflict text over generic can-merge ph
 });
 
 test("findDeferredStatusEndpoint returns only same-origin current-status URLs from HTML", async () => {
-  const doc = parseHtml(await fixture("detail-history-only.html"), "https://github.com/acme/api/pull/12");
-  assert.equal(findDeferredStatusEndpoint(doc, "https://github.com/acme/api/pull/12"), "https://github.com/acme/api/pull/12/status");
+  const doc = parseHtml(await fixture("detail-history-only.html"), "https://github.toasttab.com/acme/api/pull/12");
+  assert.equal(findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"), "https://github.toasttab.com/acme/api/pull/12/status");
   assert.equal(isSameOriginGitHubUrl("https://evil.example/acme/api/pull/12/status"), false);
 });
 
@@ -170,16 +170,18 @@ test("ensureTrackerNav targets the pulls nav and not unrelated navs", async () =
 
 test("tracker route survives GitHub's canonical pulls inbox redirect", () => {
   assert.equal(trackerUrl(), "/pulls/inbox#pr-tracker");
-  assert.equal(isTrackerRoute("https://github.com/pulls/inbox#pr-tracker"), true);
-  assert.equal(isTrackerRoute("https://github.com/pulls/inbox?pr_tracker=1"), true);
-  assert.equal(isTrackerRoute("https://github.com/pulls?pr_tracker=1"), true);
-  assert.equal(isTrackerRoute("https://github.com/pulls/inbox"), false);
-  assert.equal(isTrackerRoute("https://github.com/pulls/assigned#pr-tracker"), false);
+  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox#pr-tracker"), true);
+  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox?pr_tracker=1"), true);
+  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls?pr_tracker=1"), true);
+  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox"), false);
+  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/assigned#pr-tracker"), false);
 });
 
-test("authored PR discovery uses GitHub search instead of the redirected pulls route", () => {
+test("authored PR discovery uses the Toast GitHub Enterprise pulls route", () => {
   const url = new URL(trackerSearchUrl());
-  assert.equal(url.pathname, "/search");
-  assert.equal(url.searchParams.get("type"), "pullrequests");
+  assert.equal(url.origin, "https://github.toasttab.com");
+  assert.equal(url.pathname, "/pulls");
   assert.match(url.searchParams.get("q"), /author:@me/);
+  assert.match(url.searchParams.get("q"), /archived:false/);
+  assert.match(new URL(trackerSearchUrl("nathannorman-toast")).searchParams.get("q"), /author:nathannorman-toast/);
 });

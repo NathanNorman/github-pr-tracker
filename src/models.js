@@ -1,6 +1,7 @@
 import {
   ACTIVE_STATUSES,
   DEFAULT_RECORD,
+  GITHUB_ORIGIN,
   PERSONAL_STATUSES,
   SCHEMA_VERSION,
   TAG_COLORS
@@ -11,7 +12,7 @@ export function createPrKey(owner, repo, number) {
 }
 
 export function parsePrUrl(input) {
-  const url = new URL(input, "https://github.com");
+  const url = new URL(input, GITHUB_ORIGIN);
   const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/);
   if (!match) {
     return null;
@@ -22,7 +23,7 @@ export function parsePrUrl(input) {
     repo,
     number: Number(number),
     key: createPrKey(owner, repo, Number(number)),
-    url: `https://github.com/${owner}/${repo}/pull/${number}`
+    url: `${url.origin}/${owner}/${repo}/pull/${number}`
   };
 }
 

@@ -1,10 +1,10 @@
 import { JSDOM } from "jsdom";
 
-export function parseHtml(html, url = "https://github.com/pulls") {
+export function parseHtml(html, url = "https://github.toasttab.com/pulls") {
   return new JSDOM(html, { url }).window.document;
 }
 
-export function makeDom(url = "https://github.com/pulls/inbox#pr-tracker") {
+export function makeDom(url = "https://github.toasttab.com/pulls/inbox#pr-tracker") {
   const dom = new JSDOM(
     `<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><main><div id="default-content">Default content</div></main></body></html>`,
     { url, pretendToBeVisual: true }

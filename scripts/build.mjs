@@ -9,13 +9,13 @@ const outputFile = path.join(distDir, "github-pr-tracker.user.js");
 const metadata = `// ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.2.0
-// @description  Personal pull request tracker for your own open GitHub PRs.
+// @version      1.2.1
+// @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
 // @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js
-// @match        https://github.com/pulls*
+// @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener

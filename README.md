@@ -1,6 +1,6 @@
 # GitHub PR Tracker
 
-Personal Tampermonkey tracker for your own open GitHub pull requests. It adds a bookmarkable `My tracker` view at `https://github.com/pulls/inbox#pr-tracker`, keeps private workflow notes locally in Tampermonkey storage, and shows GitHub-native review/check/merge context only when the page data can confirm it.
+Personal Tampermonkey tracker for your own open Toast GitHub pull requests. It adds a bookmarkable `My tracker` view at `https://github.toasttab.com/pulls/inbox#pr-tracker`, keeps private workflow notes locally in Tampermonkey storage, and shows GitHub-native review/check/merge context only when the page data can confirm it.
 
 ![GitHub PR Tracker mockup](./docs/mockups/github-my-prs-personal-tracker-mockup-v2.png)
 
@@ -17,12 +17,12 @@ Fallback import steps:
 1. Install the Tampermonkey browser extension.
 2. Open the raw install link above, or open `dist/github-pr-tracker.user.js` from a local clone.
 3. Review the script header in Tampermonkey and confirm installation.
-4. Visit `https://github.com/pulls/inbox#pr-tracker`.
+4. Visit `https://github.toasttab.com/pulls/inbox#pr-tracker`.
 
 ## Usage
 
-- The script runs on `github.com/pulls*` and adds a `My tracker` entry that points to `/pulls/inbox#pr-tracker`.
-- The tracker shows only your open authored pull requests from same-origin GitHub search results.
+- The script runs only on `github.toasttab.com/pulls*` and adds a `My tracker` entry that points to `/pulls/inbox#pr-tracker`.
+- The tracker shows only your open authored pull requests from same-origin Toast GitHub results.
 - Change personal status directly from the pull request list; choosing `Blocked` opens the private detail panel for blocker context.
 - Use `Refresh` to bypass the 10-minute detail cache and refetch current per-PR review/check/merge state.
 - Personal statuses are `unsorted`, `next_up`, `waiting`, `blocked`, and `done`.
