@@ -1,0 +1,24 @@
+{
+  "name": "github-pr-tracker",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Tampermonkey personal pull request tracker for GitHub.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NathanNorman/github-pr-tracker.git"
+  },
+  "homepage": "https://github.com/NathanNorman/github-pr-tracker",
+  "bugs": {
+    "url": "https://github.com/NathanNorman/github-pr-tracker/issues"
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "test": "node --test",
+    "check:dist": "node ./scripts/check-dist.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9",
+    "jsdom": "^26.1.0"
+  }
+}

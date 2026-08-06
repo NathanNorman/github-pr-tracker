@@ -1,0 +1,367 @@
+import { DETAIL_CACHE_TTL_MS, DEFAULT_RECORD } from "./constants.js";
+import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "./detail-parser.js";
+import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl } from "./github.js";
+import { filterSummaries, getVisibleStatusOptions, normalizeTags } from "./models.js";
+import { styles } from "./styles.js";
+import { createUi } from "./ui.js";
+import { mapLimit, now } from "./utils.js";
+
+export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }) {
+  const state = {
+    login,
+    allSummaries: [],
+    filteredSummaries: [],
+    records: {},
+    search: "",
+    statusFilter: "all",
+    tagFilter: "",
+    selectedKey: null,
+    showCompleted: false,
+    refreshing: false,
+    warning: "",
+    saveState: "Saved",
+    mounted: false
+  };
+
+  let host = null;
+  let ui = null;
+  let hiddenElements = [];
+  let mountedMain = null;
+  let unsubscribe = null;
+  let trackerRouteActive = false;
+  let refreshPromise = null;
+  let queuedRefreshForce = false;
+
+  async function init() {
+    if (unsubscribe) {
+      return;
+    }
+    const envelope = await storage.load();
+    state.records = envelope.records;
+    state.allSummaries = envelope.openListCache.items || [];
+    state.filteredSummaries = computeFiltered();
+    unsubscribe = storage.subscribe((nextEnvelope) => {
+      state.records = nextEnvelope.records;
+      state.filteredSummaries = computeFiltered();
+      render();
+    });
+    await handleRoute();
+  }
+
+  function computeFiltered() {
+    return filterSummaries({
+      summaries: state.allSummaries,
+      records: state.records,
+      search: state.search,
+      statusFilter: state.statusFilter,
+      tagFilter: state.tagFilter,
+      showCompleted: state.showCompleted
+    });
+  }
+
+  function mount() {
+    const main = doc.querySelector("main");
+    if (!main) {
+      return false;
+    }
+    if (host?.isConnected && mountedMain === main) {
+      return false;
+    }
+    restoreHiddenElements();
+    mountedMain = main;
+    hiddenElements = [...main.children]
+      .filter((node) => node !== host)
+      .map((node) => ({ node, hidden: node.hidden }));
+    for (const entry of hiddenElements) {
+      entry.node.hidden = true;
+      entry.node.setAttribute("data-pr-tracker-hidden", "true");
+    }
+    if (!host) {
+      host = doc.createElement("section");
+      host.id = "tm-pr-tracker-root";
+      ui = createUi(host, createHandlers());
+    }
+    main.append(host);
+    state.mounted = true;
+    render();
+    return true;
+  }
+
+  function restoreHiddenElements() {
+    for (const entry of hiddenElements) {
+      const node = entry.node;
+      if (node instanceof HTMLElement && node.getAttribute("data-pr-tracker-hidden") === "true") {
+        node.hidden = entry.hidden;
+        node.removeAttribute("data-pr-tracker-hidden");
+      }
+    }
+    hiddenElements = [];
+    mountedMain = null;
+  }
+
+  function unmount() {
+    void ui?.flushPending();
+    if (host) {
+      host.remove();
+    }
+    restoreHiddenElements();
+    state.mounted = false;
+  }
+
+  async function handleRoute() {
+    const onTrackerRoute = isTrackerRoute(win.location);
+    if (!onTrackerRoute) {
+      trackerRouteActive = false;
+      unmount();
+      return;
+    }
+
+    const enteringRoute = !trackerRouteActive;
+    trackerRouteActive = true;
+    mount();
+    if (enteringRoute) {
+      await refresh(false);
+    }
+  }
+
+  async function refresh(force) {
+    if (refreshPromise) {
+      queuedRefreshForce = queuedRefreshForce || force;
+      return refreshPromise;
+    }
+
+    refreshPromise = (async () => {
+      state.refreshing = true;
+      state.warning = "";
+      render();
+
+      const snapshot = await storage.load();
+      const cachedItems = snapshot.openListCache.items || [];
+      const detailCache = { ...(snapshot.detailCache || {}) };
+
+      try {
+        const summaries = await fetchOpenPrs({ fetchImpl, parser });
+        const enriched = await mapLimit(summaries, 4, async (summary) => {
+          try {
+            const cached = detailCache[summary.key];
+            const shouldUseCache = !force && cached && now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
+            const detail = shouldUseCache ? cached.detail : await fetchDetail(summary);
+            detailCache[summary.key] = { updatedAt: now(), detail };
+            return {
+              ...summary,
+              ...mergeSummaryDetail(summary, detail)
+            };
+          } catch {
+            return summary;
+          }
+        });
+
+        const latest = await storage.load();
+        latest.openListCache = { updatedAt: now(), items: enriched };
+        latest.detailCache = detailCache;
+        await storage.save(latest);
+        state.allSummaries = enriched;
+        state.records = latest.records;
+        if (state.selectedKey && !state.allSummaries.some((item) => item.key === state.selectedKey)) {
+          state.selectedKey = null;
+        }
+      } catch (error) {
+        state.warning = `Refresh failed. Showing cached data. ${error.message}`;
+        state.allSummaries = cachedItems;
+      } finally {
+        state.refreshing = false;
+        state.filteredSummaries = computeFiltered();
+        render();
+      }
+    })();
+
+    try {
+      await refreshPromise;
+    } finally {
+      refreshPromise = null;
+      if (queuedRefreshForce) {
+        const nextForce = queuedRefreshForce;
+        queuedRefreshForce = false;
+        if (nextForce) {
+          await refresh(true);
+        }
+      }
+    }
+  }
+
+  async function fetchDetail(summary) {
+    const html = await fetchHtml(fetchImpl, summary.url);
+    const prDocument = parser(html);
+    let detail = parsePrDetailDocument(prDocument);
+    const needsDeferred =
+      detail.review === "unknown" ||
+      detail.checks === "unknown" ||
+      detail.merge === "unknown";
+    if (!needsDeferred) {
+      return detail;
+    }
+
+    const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
+    if (!deferredUrl || !isSameOriginGitHubUrl(deferredUrl)) {
+      return detail;
+    }
+
+    try {
+      const response = await fetchImpl(deferredUrl, {
+        credentials: "include",
+        headers: {
+          Accept: "application/json,text/html"
+        }
+      });
+      if (!response.ok) {
+        return detail;
+      }
+
+      const contentType = response.headers?.get?.("content-type") || "";
+      let deferredDetail = null;
+      if (contentType.includes("application/json")) {
+        deferredDetail = parsePrDetailPayload(await response.json());
+      } else {
+        deferredDetail = parsePrDetailDocument(parser(await response.text()));
+      }
+      return mergeNativeDetails(detail, deferredDetail);
+    } catch {
+      return detail;
+    }
+  }
+
+  async function exportData() {
+    await ui?.flushPending();
+    const envelope = await storage.load();
+    const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = doc.createElement("a");
+    anchor.href = url;
+    anchor.download = `github-pr-tracker-${login}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importFromText(rawText) {
+    await ui?.flushPending();
+    try {
+      const payload = JSON.parse(rawText);
+      await storage.importEnvelope(payload);
+      state.warning = "";
+    } catch (error) {
+      state.warning = `Import failed. ${error.message}`;
+    }
+    render();
+  }
+
+  async function importData() {
+    await ui?.flushPending();
+    const input = doc.createElement("input");
+    input.type = "file";
+    input.accept = "application/json";
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        return;
+      }
+      await importFromText(await file.text());
+    });
+    input.click();
+  }
+
+  function createHandlers() {
+    return {
+      onSearch(value) {
+        state.search = value;
+        state.filteredSummaries = computeFiltered();
+        render();
+      },
+      onStatusFilter(status) {
+        state.statusFilter = status;
+        state.filteredSummaries = computeFiltered();
+        render();
+      },
+      onTagFilter(tagName) {
+        state.tagFilter = tagName;
+        state.filteredSummaries = computeFiltered();
+        render();
+      },
+      onToggleCompleted() {
+        state.showCompleted = !state.showCompleted;
+        state.filteredSummaries = computeFiltered();
+        render();
+      },
+      onSelect(key) {
+        if (state.selectedKey && state.selectedKey !== key) {
+          void ui?.flushPending(state.selectedKey);
+        }
+        state.selectedKey = key;
+        render();
+      },
+      async onRefresh() {
+        await refresh(true);
+      },
+      async onEdit(key, patch, timestamp) {
+        try {
+          await storage.upsertRecord(key, patch, timestamp);
+          setSaveState("Saved");
+        } catch (error) {
+          setSaveState(`Error: ${error.message}`);
+        }
+      },
+      onLocalPatch(key, patch) {
+        state.records[key] = { ...(state.records[key] || DEFAULT_RECORD), ...patch };
+      },
+      async onAddTag(key, name, color) {
+        const current = state.records[key] || DEFAULT_RECORD;
+        const tags = normalizeTags([...current.tags, { name, color }]);
+        await storage.upsertRecord(key, { tags }, now());
+      },
+      async onRemoveTag(key, tagName) {
+        const current = state.records[key] || DEFAULT_RECORD;
+        const tags = current.tags.filter((tag) => tag.name.toLocaleLowerCase() !== tagName.toLocaleLowerCase());
+        await storage.upsertRecord(key, { tags }, now());
+      },
+      onExport: exportData,
+      onImport: importData
+    };
+  }
+
+  function setSaveState(value) {
+    state.saveState = value;
+    ui?.setSaveState(value);
+  }
+
+  function render() {
+    if (!state.mounted || !ui) {
+      return;
+    }
+    state.filteredSummaries = computeFiltered();
+    ui.render({
+      ...state,
+      visibleStatuses: getVisibleStatusOptions(state.showCompleted),
+      styles
+    });
+  }
+
+  return {
+    init,
+    mount,
+    unmount,
+    handleRoute,
+    refresh,
+    importFromText,
+    exportData,
+    flushPending: () => ui?.flushPending(),
+    getState: () => state
+  };
+}
+
+function mergeSummaryDetail(summary, detail) {
+  return {
+    review: detail.review,
+    checks: detail.checks,
+    merge: detail.merge,
+    draft: typeof detail.draft === "boolean" ? detail.draft : summary.draft
+  };
+}
