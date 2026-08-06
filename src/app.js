@@ -1,7 +1,7 @@
 import { DETAIL_CACHE_TTL_MS, DEFAULT_RECORD } from "./constants.js";
 import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "./detail-parser.js";
 import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl } from "./github.js";
-import { filterSummaries, getVisibleStatusOptions, normalizeTags } from "./models.js";
+import { filterSummaries, normalizeTags } from "./models.js";
 import { styles } from "./styles.js";
 import { createUi } from "./ui.js";
 import { mapLimit, now } from "./utils.js";
@@ -26,6 +26,8 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
   let host = null;
   let ui = null;
   let hiddenElements = [];
+  let hiddenLayoutElements = [];
+  let layoutStyleSnapshots = [];
   let mountedMain = null;
   let unsubscribe = null;
   let trackerRouteActive = false;
@@ -76,6 +78,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       entry.node.hidden = true;
       entry.node.setAttribute("data-pr-tracker-hidden", "true");
     }
+    adaptNativeLayout(main);
     if (!host) {
       host = doc.createElement("section");
       host.id = "tm-pr-tracker-root";
@@ -96,7 +99,61 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       }
     }
     hiddenElements = [];
+    restoreNativeLayout();
     mountedMain = null;
+  }
+
+  function adaptNativeLayout(main) {
+    const parent = main.parentElement;
+    if (!parent || parent === doc.body || parent === doc.documentElement) {
+      return;
+    }
+
+    const siblings = [...parent.children].filter((node) => node !== main && node instanceof HTMLElement);
+    const semanticSiblings = siblings.filter((node) =>
+      node.matches('aside, [role="complementary"], [data-testid*="sidebar" i], [class*="sidebar" i]')
+    );
+    const computedDisplay = win.getComputedStyle?.(parent)?.display;
+    const layoutSiblings = semanticSiblings.length
+      ? semanticSiblings
+      : computedDisplay === "grid" && siblings.length <= 2
+        ? siblings
+        : [];
+
+    for (const node of layoutSiblings) {
+      hiddenLayoutElements.push({ node, hidden: node.hidden });
+      node.hidden = true;
+      node.setAttribute("data-pr-tracker-layout-hidden", "true");
+    }
+    if (!layoutSiblings.length) {
+      return;
+    }
+
+    for (const element of [parent, main]) {
+      layoutStyleSnapshots.push({ element, style: element.getAttribute("style") });
+    }
+    parent.style.gridTemplateColumns = "minmax(0, 1fr)";
+    main.style.gridColumn = "1 / -1";
+    main.style.width = "100%";
+    main.style.maxWidth = "none";
+  }
+
+  function restoreNativeLayout() {
+    for (const entry of hiddenLayoutElements) {
+      if (entry.node.getAttribute("data-pr-tracker-layout-hidden") === "true") {
+        entry.node.hidden = entry.hidden;
+        entry.node.removeAttribute("data-pr-tracker-layout-hidden");
+      }
+    }
+    hiddenLayoutElements = [];
+    for (const snapshot of layoutStyleSnapshots) {
+      if (snapshot.style === null) {
+        snapshot.element.removeAttribute("style");
+      } else {
+        snapshot.element.setAttribute("style", snapshot.style);
+      }
+    }
+    layoutStyleSnapshots = [];
   }
 
   function unmount() {
@@ -278,6 +335,9 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       },
       onStatusFilter(status) {
         state.statusFilter = status;
+        if (status === "done") {
+          state.showCompleted = true;
+        }
         state.filteredSummaries = computeFiltered();
         render();
       },
@@ -307,6 +367,24 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
           setSaveState("Saved");
         } catch (error) {
           setSaveState(`Error: ${error.message}`);
+        }
+      },
+      async onQuickStatus(key, status) {
+        const previous = state.records[key] || DEFAULT_RECORD;
+        const timestamp = now();
+        state.records[key] = { ...previous, status, modifiedAt: timestamp };
+        if (status === "blocked") {
+          state.selectedKey = key;
+        }
+        state.filteredSummaries = computeFiltered();
+        render();
+        try {
+          await storage.upsertRecord(key, { status }, timestamp);
+          setSaveState("Saved");
+        } catch (error) {
+          state.records[key] = previous;
+          state.warning = `Could not save status. ${error.message}`;
+          render();
         }
       },
       onLocalPatch(key, patch) {
@@ -339,7 +417,6 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     state.filteredSummaries = computeFiltered();
     ui.render({
       ...state,
-      visibleStatuses: getVisibleStatusOptions(state.showCompleted),
       styles
     });
   }

@@ -9,7 +9,7 @@ const outputFile = path.join(distDir, "github-pr-tracker.user.js");
 const metadata = `// ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.0.1
+// @version      1.1.0
 // @description  Personal pull request tracker for your own open GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues

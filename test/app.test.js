@@ -71,7 +71,7 @@ test("handleRoute only auto-refreshes once per route entry", async () => {
     dom,
     storage,
     fetchImpl: async (url) => {
-      if (String(url).includes("/pulls")) {
+      if (String(url).includes("/search")) {
         pullFetches += 1;
         return { ok: true, text: async () => "<html><body></body></html>" };
       }
@@ -104,7 +104,7 @@ test("search and notes keep focus and value across updates", async () => {
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/pulls")
+        String(url).includes("/search")
           ? pullsHtml([{ href: "/acme/api/pull/1", title: "Fix CI", draft: false }])
           : "<html><body></body></html>"
     })
@@ -154,7 +154,7 @@ test("pending edits stay keyed to the correct PR and flush on close", async () =
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/pulls")
+        String(url).includes("/search")
           ? pullsHtml([
               { href: "/acme/api/pull/1", title: "One", draft: false },
               { href: "/acme/api/pull/2", title: "Two", draft: false }
@@ -174,7 +174,7 @@ test("pending edits stay keyed to the correct PR and flush on close", async () =
   notes = shadow.querySelector("textarea");
   notes.value = "beta";
   notes.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  shadow.querySelector(".drawer .action-btn").click();
+  shadow.querySelector(".drawer .icon-btn").click();
   await new Promise((resolve) => setTimeout(resolve, 25));
 
   assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "alpha");
@@ -199,7 +199,7 @@ test("refresh preserves concurrent personal edits made during fetch", async () =
     dom,
     storage,
     fetchImpl: async (url) => {
-      if (String(url).includes("/pulls")) {
+      if (String(url).includes("/search")) {
         await gate;
         return {
           ok: true,
@@ -231,7 +231,7 @@ test("detail refresh merges deferred fields and preserves list draft flag", asyn
     storage,
     fetchImpl: async (url) => {
       const value = String(url);
-      if (value.includes("/pulls")) {
+      if (value.includes("/search")) {
         return {
           ok: true,
           text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: true }])
@@ -277,7 +277,7 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/pulls")
+        String(url).includes("/search")
           ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
           : "<html><body></body></html>"
     })
@@ -288,6 +288,43 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
   const rowButton = shadow.querySelector(".pr-row-select");
   rowButton.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.equal(app.getState().selectedKey, "acme/api#1");
+});
+
+test("personal status can be changed directly from a PR row", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/search")
+          ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
+          : "<html><body></body></html>"
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const select = shadow.querySelector(".quick-status .status-select");
+  select.value = "blocked";
+  select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(storage.getEnvelope().records["acme/api#1"].status, "blocked");
+  assert.equal(app.getState().selectedKey, "acme/api#1");
+  assert.equal(shadow.querySelector(".drawer").hidden, false);
+  assert.equal(shadow.querySelector('[data-focus-id="blockedBy"]').hidden, false);
 });
 
 test("import errors surface as warnings", async () => {
@@ -343,7 +380,7 @@ test("awaited export flush includes the latest pending note", async () => {
     fetchImpl: async (url) => ({
       ok: true,
       text: async () =>
-        String(url).includes("/pulls")
+        String(url).includes("/search")
           ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
           : "<html><body></body></html>"
     })
@@ -362,10 +399,18 @@ test("awaited export flush includes the latest pending note", async () => {
 
 test("unmount restores original hidden state exactly", async () => {
   const dom = makeDom();
+  const main = dom.window.document.querySelector("main");
+  const layout = dom.window.document.createElement("div");
+  layout.style.display = "grid";
+  layout.style.gridTemplateColumns = "minmax(0, 1fr) 320px";
+  const sidebar = dom.window.document.createElement("aside");
+  sidebar.textContent = "Native GitHub sidebar";
+  dom.window.document.body.insertBefore(layout, main);
+  layout.append(main, sidebar);
   const hiddenChild = dom.window.document.createElement("div");
   hiddenChild.id = "was-hidden";
   hiddenChild.hidden = true;
-  dom.window.document.querySelector("main").append(hiddenChild);
+  main.append(hiddenChild);
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {},
@@ -378,7 +423,12 @@ test("unmount restores original hidden state exactly", async () => {
     fetchImpl: async () => ({ ok: true, text: async () => "<html><body></body></html>" })
   });
   await app.init();
+  assert.equal(sidebar.hidden, true);
+  assert.equal(main.style.gridColumn, "1 / -1");
   dom.window.history.pushState({}, "", "/pulls");
   await app.handleRoute();
   assert.equal(hiddenChild.hidden, true);
+  assert.equal(sidebar.hidden, false);
+  assert.equal(main.getAttribute("style"), null);
+  assert.equal(layout.style.gridTemplateColumns, "minmax(0, 1fr) 320px");
 });

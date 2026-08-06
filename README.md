@@ -23,6 +23,7 @@ Fallback import steps:
 
 - The script runs on `github.com/pulls*` and adds a `My tracker` entry that points to `/pulls/inbox#pr-tracker`.
 - The tracker shows only your open authored pull requests from same-origin GitHub search results.
+- Change personal status directly from the pull request list; choosing `Blocked` opens the private detail panel for blocker context.
 - Use `Refresh` to bypass the 10-minute detail cache and refetch current per-PR review/check/merge state.
 - Personal statuses are `unsorted`, `next_up`, `waiting`, `blocked`, and `done`.
 - `Show completed` reveals `done` items without mixing them into the default active views.

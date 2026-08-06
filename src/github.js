@@ -144,7 +144,7 @@ export async function fetchOpenPrs({ fetchImpl, parser, startUrl = trackerSearch
 }
 
 export function trackerSearchUrl() {
-  return "https://github.com/pulls?q=is%3Aopen+is%3Apr+author%3A%40me";
+  return "https://github.com/search?q=is%3Aopen+is%3Apr+author%3A%40me&type=pullrequests";
 }
 
 export function isSameOriginGitHubUrl(value) {

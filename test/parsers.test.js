@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { ensureTrackerNav, fetchOpenPrs, isSameOriginGitHubUrl, isTrackerRoute, parsePullListDocument, trackerUrl } from "../src/github.js";
+import { ensureTrackerNav, fetchOpenPrs, isSameOriginGitHubUrl, isTrackerRoute, parsePullListDocument, trackerSearchUrl, trackerUrl } from "../src/github.js";
 import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "../src/detail-parser.js";
 import { parsePrUrl } from "../src/models.js";
 import { parseHtml } from "./helpers.js";
@@ -23,7 +23,7 @@ test("parsePullListDocument groups duplicate links and ignores cross-origin pagi
 
 test("fetchOpenPrs follows unique same-origin pagination links", async () => {
   const pages = new Map([
-    ["https://github.com/pulls?q=is%3Aopen+is%3Apr+author%3A%40me", await fixture("pulls-page1.html")],
+    ["https://github.com/search?q=is%3Aopen+is%3Apr+author%3A%40me&type=pullrequests", await fixture("pulls-page1.html")],
     ["https://github.com/pulls?page=2", await fixture("pulls-page2.html")]
   ]);
   const summaries = await fetchOpenPrs({
@@ -136,4 +136,11 @@ test("tracker route survives GitHub's canonical pulls inbox redirect", () => {
   assert.equal(isTrackerRoute("https://github.com/pulls?pr_tracker=1"), true);
   assert.equal(isTrackerRoute("https://github.com/pulls/inbox"), false);
   assert.equal(isTrackerRoute("https://github.com/pulls/assigned#pr-tracker"), false);
+});
+
+test("authored PR discovery uses GitHub search instead of the redirected pulls route", () => {
+  const url = new URL(trackerSearchUrl());
+  assert.equal(url.pathname, "/search");
+  assert.equal(url.searchParams.get("type"), "pullrequests");
+  assert.match(url.searchParams.get("q"), /author:@me/);
 });

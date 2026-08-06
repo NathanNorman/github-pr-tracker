@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.0.1
+// @version      1.1.0
 // @description  Personal pull request tracker for your own open GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
@@ -451,9 +451,6 @@
       return haystack.includes(normalizedSearch);
     });
   }
-  function getVisibleStatusOptions(showCompleted) {
-    return showCompleted ? [...ACTIVE_STATUSES, "done"] : ACTIVE_STATUSES;
-  }
 
   // src/github.js
   function isTrackerRoute(location) {
@@ -582,7 +579,7 @@
     return allItems;
   }
   function trackerSearchUrl() {
-    return "https://github.com/pulls?q=is%3Aopen+is%3Apr+author%3A%40me";
+    return "https://github.com/search?q=is%3Aopen+is%3Apr+author%3A%40me&type=pullrequests";
   }
   function isSameOriginGitHubUrl(value) {
     try {
@@ -620,245 +617,645 @@
   // src/styles.js
   var styles = `
 :host {
-  color: var(--fgColor-default, inherit);
-  font: var(--base-text-body, normal 400 14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);
+  display: block;
+  width: 100%;
+  min-width: 0;
+  color: var(--fgColor-default, #1f2328);
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
 }
 * {
   box-sizing: border-box;
 }
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+select {
+  cursor: pointer;
+}
+.tracker-root {
+  width: 100%;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+}
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  margin: 0 0 24px;
+}
+.page-heading {
+  min-width: 0;
+}
+.page-heading h1 {
+  margin: 0;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.page-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 6px;
+  color: var(--fgColor-muted, #59636e);
+}
+.privacy-note::before {
+  content: "\u25A3";
+  margin-right: 6px;
+  font-size: 11px;
+}
+.page-header input[type="search"] {
+  width: min(360px, 38vw);
+  height: 36px;
+  padding: 7px 12px 7px 34px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 8px;
+  background-color: var(--bgColor-default, #ffffff);
+  background-image: radial-gradient(circle, transparent 5px, var(--fgColor-muted, #59636e) 5px, var(--fgColor-muted, #59636e) 6px, transparent 6px), linear-gradient(45deg, transparent 46%, var(--fgColor-muted, #59636e) 47%, var(--fgColor-muted, #59636e) 54%, transparent 55%);
+  background-position: 10px 10px, 22px 22px;
+  background-repeat: no-repeat;
+  background-size: 14px 14px, 7px 7px;
+  color: var(--fgColor-default, #1f2328);
+  box-shadow: var(--shadow-inset, inset 0 1px 0 rgba(31,35,40,0.04));
+}
 .tracker-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
-  gap: 16px;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 24px;
   align-items: start;
 }
-.panel,
-.drawer,
-.modal {
-  background: var(--bgColor-default, transparent);
-  color: var(--fgColor-default, inherit);
-  border: 1px solid var(--borderColor-default, color-mix(in srgb, currentColor 22%, transparent));
-  border-radius: 12px;
-  box-shadow: var(--shadow-resting-small, none);
+.tracker-shell.has-drawer {
+  grid-template-columns: 180px minmax(0, 1fr) minmax(320px, 360px);
 }
-.panel {
-  overflow: hidden;
+.status-sidebar {
+  position: sticky;
+  top: 20px;
+  min-width: 0;
 }
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid var(--borderColor-muted, color-mix(in srgb, currentColor 15%, transparent));
-}
-.toolbar input[type="search"],
-.drawer textarea,
-.drawer input[type="text"],
-.drawer select {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--borderColor-default, color-mix(in srgb, currentColor 22%, transparent));
-  border-radius: 8px;
-  background: var(--bgColor-inset, var(--bgColor-default, transparent));
-  color: inherit;
-}
-.toolbar .spacer {
-  flex: 1 1 160px;
+.eyebrow {
+  margin: 0 10px 8px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 3px;
 }
 .filter-btn,
-.action-btn,
-.link-btn {
-  border: 1px solid var(--borderColor-default, color-mix(in srgb, currentColor 22%, transparent));
-  background: var(--button-default-bgColor-rest, var(--bgColor-muted, transparent));
-  color: var(--button-default-fgColor-rest, inherit);
-  border-radius: 999px;
-  padding: 6px 10px;
-  cursor: pointer;
-  text-decoration: none;
+.sidebar-action {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fgColor-default, #1f2328);
+  text-align: left;
+}
+.filter-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+}
+.filter-btn:hover,
+.sidebar-action:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.16));
 }
 .filter-btn[aria-pressed="true"] {
-  border-color: var(--borderColor-accent-emphasis, currentColor);
-  outline: 2px solid transparent;
+  background: var(--control-transparent-bgColor-selected, rgba(175,184,193,0.22));
+  box-shadow: inset 3px 0 0 var(--borderColor-accent-emphasis, #0969da);
+  font-weight: 600;
+}
+.filter-count {
+  min-width: 26px;
+  padding: 1px 7px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 999px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  text-align: center;
+}
+.sidebar-tools {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+.sidebar-action {
+  padding: 7px 10px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 13px;
+}
+.sidebar-action[aria-pressed="true"] {
+  color: var(--fgColor-accent, #0969da);
+}
+.data-label {
+  margin-top: 18px;
+}
+.panel,
+.drawer {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 10px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  box-shadow: var(--shadow-resting-small, 0 1px 0 rgba(31,35,40,0.04));
+}
+.panel-header {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  background: var(--bgColor-muted, #f6f8fa);
+}
+.result-count {
+  font-size: 14px;
+  font-weight: 600;
+}
+.action-btn,
+.link-btn,
+.icon-btn {
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  background: var(--button-default-bgColor-rest, var(--bgColor-muted, #f6f8fa));
+  color: var(--button-default-fgColor-rest, var(--fgColor-default, #1f2328));
+  text-decoration: none;
+}
+.action-btn {
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.action-btn:hover,
+.icon-btn:hover {
+  background: var(--button-default-bgColor-hover, var(--bgColor-neutral-muted, #eaeef2));
+}
+.action-btn:disabled {
+  cursor: default;
+  opacity: 0.65;
 }
 .list {
   display: grid;
 }
-.pr-row,
-.pr-row-select {
-  display: grid;
-  gap: 8px;
-  padding: 14px 16px;
-  border-top: 1px solid var(--borderColor-muted, color-mix(in srgb, currentColor 15%, transparent));
-  cursor: pointer;
-}
 .pr-row {
-  border-top: 1px solid var(--borderColor-muted, color-mix(in srgb, currentColor 15%, transparent));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 156px;
+  grid-template-areas:
+    "select status"
+    "tags status";
+  align-items: center;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
 }
-.pr-row:first-child,
-.pr-row-select:first-child {
+.pr-row:first-child {
   border-top: 0;
 }
+.pr-row:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.08));
+}
+.pr-row:has(.pr-row-select[aria-selected="true"]) {
+  background: var(--bgColor-accent-muted, rgba(84,174,255,0.12));
+  box-shadow: inset 3px 0 0 var(--borderColor-accent-emphasis, #0969da);
+}
 .pr-row-select {
+  grid-area: select;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 12px;
   width: 100%;
-  text-align: left;
+  min-width: 0;
+  padding: 15px 12px 12px 16px;
   border: 0;
   background: transparent;
   color: inherit;
+  text-align: left;
 }
-.pr-row-select[aria-selected="true"] {
-  background: var(--bgColor-accent-muted, color-mix(in srgb, currentColor 8%, transparent));
+.pr-icon {
+  padding-top: 18px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 20px;
+  line-height: 1;
 }
-.row-main {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+.row-copy {
+  display: block;
+  min-width: 0;
+}
+.title,
+.repo,
+.row-details,
+.blocker-preview {
+  display: block;
 }
 .title {
+  overflow: hidden;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 16px;
   font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
 }
 .repo {
-  color: var(--fgColor-muted, inherit);
+  margin-bottom: 2px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 13px;
 }
-.badges,
+.row-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  margin-top: 7px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+.badge {
+  white-space: nowrap;
+}
+.badge::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--fgColor-muted, #59636e);
+  vertical-align: 1px;
+}
+.badge[data-state="approved"]::before,
+.badge[data-state="passing"]::before,
+.badge[data-state="clean"]::before {
+  background: var(--fgColor-success, #1a7f37);
+}
+.badge[data-state="failing"]::before,
+.badge[data-state="changes_requested"]::before,
+.badge[data-state="conflicting"]::before,
+.badge[data-state="blocked"]::before {
+  background: var(--fgColor-danger, #d1242f);
+}
+.badge[data-state="pending"]::before,
+.badge[data-state="required"]::before {
+  background: var(--fgColor-attention, #9a6700);
+}
+.badge[data-state="unknown"] {
+  opacity: 0.68;
+}
+.blocker-preview {
+  overflow: hidden;
+  margin-top: 5px;
+  color: var(--fgColor-danger, #d1242f);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quick-status {
+  position: relative;
+  grid-area: status;
+  margin: 0 14px 0 4px;
+}
+.quick-status::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 11px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fgColor-muted, #59636e);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.quick-status[data-status="next_up"]::before {
+  background: var(--fgColor-accent, #0969da);
+}
+.quick-status[data-status="waiting"]::before {
+  background: var(--fgColor-attention, #9a6700);
+}
+.quick-status[data-status="blocked"]::before {
+  background: var(--fgColor-danger, #d1242f);
+}
+.quick-status[data-status="done"]::before {
+  background: var(--fgColor-success, #1a7f37);
+}
+.status-select,
+.drawer select,
+.drawer textarea,
+.drawer input[type="text"] {
+  width: 100%;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 7px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+  box-shadow: var(--shadow-inset, inset 0 1px 0 rgba(31,35,40,0.04));
+}
+.status-select {
+  height: 34px;
+  padding: 5px 28px 5px 28px;
+}
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-.badge,
-.tag-pill {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
+}
+.row-tags {
+  grid-area: tags;
+  padding: 0 12px 12px 52px;
+}
+.tag-pill {
   min-height: 24px;
   padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--borderColor-muted, color-mix(in srgb, currentColor 15%, transparent));
+  border: 1px solid;
+  border-radius: 6px;
   font-size: 12px;
 }
 .drawer {
   position: sticky;
-  top: 16px;
-  padding: 16px;
+  top: 20px;
   display: grid;
-  gap: 12px;
+  gap: 20px;
+  max-height: calc(100vh - 40px);
+  padding: 20px;
+  overflow: auto;
 }
-.drawer label {
-  display: grid;
-  gap: 6px;
-  font-weight: 600;
+.drawer[hidden] {
+  display: none;
 }
 .drawer-header {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  align-items: start;
 }
+.drawer-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.drawer-subtitle,
 .save-state {
-  color: var(--fgColor-muted, inherit);
-  min-height: 1.25em;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
 }
-.warning {
-  margin: 0 16px 16px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--borderColor-attention-muted, color-mix(in srgb, currentColor 22%, transparent));
-  background: var(--bgColor-attention-muted, color-mix(in srgb, currentColor 8%, transparent));
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
 }
-.empty {
-  padding: 24px 16px;
-  color: var(--fgColor-muted, inherit);
+.drawer-identity {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+.drawer-identity .title {
+  white-space: normal;
+}
+.field {
+  display: grid;
+  gap: 7px;
+}
+.field-label {
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+  font-weight: 600;
+}
+.drawer select,
+.drawer input[type="text"] {
+  height: 36px;
+  padding: 7px 10px;
+}
+.drawer textarea {
+  min-height: 150px;
+  padding: 9px 10px;
+  line-height: 1.5;
+  resize: vertical;
 }
 .tag-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 84px auto;
+  gap: 7px;
 }
-.tag-colors {
+.drawer-footer {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
 }
-.tag-color {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  border: 2px solid var(--borderColor-default, color-mix(in srgb, currentColor 22%, transparent));
-  cursor: pointer;
+.save-state {
+  min-height: 18px;
 }
-.tag-color[aria-pressed="true"] {
-  outline: 2px solid var(--borderColor-accent-emphasis, currentColor);
+.link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--fgColor-accent, #0969da);
+  font-size: 13px;
+}
+.warning {
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--borderColor-attention-muted, #d4a72c66);
+  border-radius: 7px;
+  background: var(--bgColor-attention-muted, #fff8c5);
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+}
+.warning[hidden] {
+  display: none;
+}
+.empty {
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  min-height: 240px;
+  padding: 36px 20px;
+  color: var(--fgColor-muted, #59636e);
+  text-align: center;
+}
+.empty strong {
+  color: var(--fgColor-default, #1f2328);
+  font-size: 16px;
+}
+.empty span {
+  font-size: 13px;
 }
 .sr-only {
   position: absolute;
   width: 1px;
   height: 1px;
+  padding: 0;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 :focus-visible {
-  outline: 2px solid var(--focus-outlineColor, var(--borderColor-accent-emphasis, currentColor));
+  outline: 2px solid var(--focus-outlineColor, var(--borderColor-accent-emphasis, #0969da));
   outline-offset: 2px;
 }
-@media (max-width: 960px) {
-  .tracker-shell {
-    grid-template-columns: 1fr;
+@media (max-width: 1180px) {
+  .tracker-shell.has-drawer {
+    grid-template-columns: 180px minmax(0, 1fr);
   }
   .drawer {
     position: fixed;
-    inset: auto 12px 12px 12px;
-    max-height: min(80vh, 720px);
-    overflow: auto;
     z-index: 1000;
-    background: var(--overlay-bgColor, var(--bgColor-default, transparent));
+    top: 76px;
+    right: 18px;
+    bottom: 18px;
+    width: min(380px, calc(100vw - 36px));
+    max-height: none;
+    background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
+    box-shadow: var(--shadow-floating-large, 0 8px 24px rgba(31,35,40,0.18));
+  }
+}
+@media (max-width: 820px) {
+  .tracker-root {
+    padding: 20px 12px 36px;
+  }
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .page-header input[type="search"] {
+    width: 100%;
+  }
+  .tracker-shell,
+  .tracker-shell.has-drawer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .status-sidebar {
+    position: static;
+  }
+  .filters {
+    display: flex;
+    overflow-x: auto;
+  }
+  .filter-btn {
+    width: auto;
+    min-width: max-content;
+  }
+  .sidebar-tools {
+    display: none;
+  }
+}
+@media (max-width: 620px) {
+  .pr-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "select"
+      "tags"
+      "status";
+  }
+  .quick-status {
+    margin: 0 16px 14px 52px;
   }
 }
 `;
 
   // src/ui.js
+  var STATUS_LABELS = {
+    unsorted: "Unsorted",
+    next_up: "Next up",
+    waiting: "Waiting",
+    blocked: "Blocked",
+    done: "Done"
+  };
   function createUi(container, handlers) {
+    const doc = container.ownerDocument;
     const shadow = container.shadowRoot || container.attachShadow({ mode: "open" });
-    const style = document.createElement("style");
-    const root = document.createElement("div");
+    const style = doc.createElement("style");
+    const root = doc.createElement("div");
     root.className = "tracker-root";
     shadow.replaceChildren(style, root);
-    const shell = document.createElement("div");
-    shell.className = "tracker-shell";
-    const panel = document.createElement("section");
-    panel.className = "panel";
-    const drawer = document.createElement("aside");
-    drawer.className = "drawer";
-    shell.append(panel, drawer);
-    root.append(shell);
-    const toolbar = document.createElement("div");
-    toolbar.className = "toolbar";
-    const search = document.createElement("input");
+    const pageHeader = doc.createElement("header");
+    pageHeader.className = "page-header";
+    const heading = doc.createElement("div");
+    heading.className = "page-heading";
+    const pageTitle = doc.createElement("h1");
+    pageTitle.textContent = "My pull requests";
+    const pageSubtitle = doc.createElement("div");
+    pageSubtitle.className = "page-subtitle";
+    const subtitleText = doc.createElement("span");
+    subtitleText.textContent = "Personal workflow for pull requests you opened";
+    const privacy = doc.createElement("span");
+    privacy.className = "privacy-note";
+    privacy.textContent = "Private to this browser";
+    pageSubtitle.append(subtitleText, privacy);
+    heading.append(pageTitle, pageSubtitle);
+    const search = doc.createElement("input");
     search.type = "search";
-    search.placeholder = "Search titles, repos, tags, notes";
+    search.placeholder = "Search my pull requests";
     search.setAttribute("aria-label", "Search pull requests");
     search.setAttribute("data-focus-id", "search");
     search.addEventListener("input", (event) => handlers.onSearch(event.target.value));
-    const filters = document.createElement("div");
+    pageHeader.append(heading, search);
+    const shell = doc.createElement("div");
+    shell.className = "tracker-shell";
+    const sidebar = doc.createElement("nav");
+    sidebar.className = "status-sidebar";
+    sidebar.setAttribute("aria-label", "Personal status filters");
+    const sidebarLabel = doc.createElement("div");
+    sidebarLabel.className = "eyebrow";
+    sidebarLabel.textContent = "My status";
+    const filters = doc.createElement("div");
     filters.className = "filters";
-    const spacer = document.createElement("div");
-    spacer.className = "spacer";
-    const showCompleted = makeActionButton(() => handlers.onToggleCompleted());
-    const refreshButton = makeActionButton(() => handlers.onRefresh());
-    const exportButton = makeActionButton(() => handlers.onExport());
-    const importButton = makeActionButton(() => handlers.onImport());
-    toolbar.append(search, filters, spacer, showCompleted, refreshButton, exportButton, importButton);
-    const warning = document.createElement("div");
+    const sidebarTools = doc.createElement("div");
+    sidebarTools.className = "sidebar-tools";
+    const viewLabel = doc.createElement("div");
+    viewLabel.className = "eyebrow";
+    viewLabel.textContent = "View";
+    const showCompleted = makeActionButton("", () => handlers.onToggleCompleted(), "sidebar-action");
+    const dataLabel = doc.createElement("div");
+    dataLabel.className = "eyebrow data-label";
+    dataLabel.textContent = "Local data";
+    const exportButton = makeActionButton("Export backup", () => handlers.onExport(), "sidebar-action");
+    const importButton = makeActionButton("Import backup", () => handlers.onImport(), "sidebar-action");
+    sidebarTools.append(viewLabel, showCompleted, dataLabel, exportButton, importButton);
+    sidebar.append(sidebarLabel, filters, sidebarTools);
+    const panel = doc.createElement("section");
+    panel.className = "panel";
+    const panelHeader = doc.createElement("div");
+    panelHeader.className = "panel-header";
+    const resultCount = doc.createElement("strong");
+    resultCount.className = "result-count";
+    const refreshButton = makeActionButton("Refresh", () => handlers.onRefresh(), "action-btn");
+    panelHeader.append(resultCount, refreshButton);
+    const warning = doc.createElement("div");
     warning.className = "warning";
-    const list = document.createElement("div");
+    const list = doc.createElement("div");
     list.className = "list";
-    panel.append(toolbar, warning, list);
-    const saveState = document.createElement("div");
+    panel.append(panelHeader, warning, list);
+    const drawer = doc.createElement("aside");
+    drawer.className = "drawer";
+    drawer.setAttribute("aria-label", "Personal pull request details");
+    shell.append(sidebar, panel, drawer);
+    root.append(pageHeader, shell);
+    const saveState = doc.createElement("div");
     saveState.className = "save-state";
     saveState.setAttribute("aria-live", "polite");
     const pendingSaves = /* @__PURE__ */ new Map();
@@ -879,24 +1276,38 @@
       if (search.value !== state.search) {
         search.value = state.search;
       }
-      showCompleted.textContent = state.showCompleted ? "Hide completed" : "Show completed";
-      refreshButton.textContent = state.refreshing ? "Refreshing..." : "Refresh";
+      const availableCount = state.allSummaries.filter((summary) => {
+        const record = state.records[summary.key] || DEFAULT_RECORD;
+        return state.showCompleted || record.status !== "done";
+      }).length;
+      const visibleCount = state.filteredSummaries.length;
+      resultCount.textContent = visibleCount === availableCount ? formatCount(visibleCount) : `${visibleCount} of ${formatCount(availableCount)}`;
+      showCompleted.textContent = state.showCompleted ? "Hide done from All" : "Include done in All";
+      showCompleted.setAttribute("aria-pressed", String(state.showCompleted));
+      refreshButton.textContent = state.refreshing ? "Refreshing\u2026" : "Refresh";
       refreshButton.disabled = state.refreshing;
-      exportButton.textContent = "Export data";
-      importButton.textContent = "Import data";
-      const options = ["all", ...state.visibleStatuses];
+      const counts = countStatuses(state);
+      const options = ["all", ...PERSONAL_STATUSES];
       const existing = new Map([...filters.querySelectorAll("button")].map((button) => [button.dataset.status, button]));
       for (const status of options) {
         let button = existing.get(status);
         if (!button) {
-          button = document.createElement("button");
+          button = doc.createElement("button");
           button.type = "button";
           button.className = "filter-btn";
           button.dataset.status = status;
           button.addEventListener("click", () => handlers.onStatusFilter(status));
+          const label = doc.createElement("span");
+          label.className = "filter-label";
+          const count = doc.createElement("span");
+          count.className = "filter-count";
+          button.append(label, count);
           filters.append(button);
         }
-        button.textContent = status === "all" ? "All" : status.replaceAll("_", " ");
+        button.querySelector(".filter-label").textContent = status === "all" ? state.showCompleted ? "All" : "All active" : STATUS_LABELS[status];
+        button.querySelector(".filter-count").textContent = String(
+          status === "all" ? state.showCompleted ? state.allSummaries.length : counts.active : counts[status]
+        );
         button.setAttribute("aria-pressed", String(state.statusFilter === status));
         existing.delete(status);
       }
@@ -911,21 +1322,34 @@
     function renderList(state) {
       list.textContent = "";
       if (!state.filteredSummaries.length) {
-        const empty = document.createElement("div");
+        const empty = doc.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No pull requests match the current filters.";
+        const emptyTitle = doc.createElement("strong");
+        const emptyText = doc.createElement("span");
+        if (state.refreshing && !state.allSummaries.length) {
+          emptyTitle.textContent = "Loading your pull requests\u2026";
+          emptyText.textContent = "Fetching open pull requests authored by you.";
+        } else if (!state.allSummaries.length) {
+          emptyTitle.textContent = "No open pull requests found";
+          emptyText.textContent = "Refresh to check GitHub again.";
+        } else {
+          emptyTitle.textContent = "Nothing matches this view";
+          emptyText.textContent = "Try another status or clear your search.";
+        }
+        empty.append(emptyTitle, emptyText);
         list.append(empty);
         return;
       }
       for (const summary of state.filteredSummaries) {
         const record = state.records[summary.key] || DEFAULT_RECORD;
-        const row = document.createElement("div");
+        const row = doc.createElement("div");
         row.className = "pr-row";
         row.dataset.prKey = summary.key;
-        const rowButton = document.createElement("button");
+        const rowButton = doc.createElement("button");
         rowButton.type = "button";
         rowButton.className = "pr-row-select";
         rowButton.setAttribute("aria-selected", String(state.selectedKey === summary.key));
+        rowButton.setAttribute("aria-label", `Edit personal tracking for ${summary.title}`);
         rowButton.addEventListener("click", () => {
           focusedBeforeDrawer = shadow.activeElement;
           handlers.onSelect(summary.key);
@@ -937,38 +1361,60 @@
             handlers.onSelect(summary.key);
           }
         });
-        const main = document.createElement("div");
-        main.className = "row-main";
-        const left = document.createElement("div");
-        const title = document.createElement("div");
-        title.className = "title";
-        title.textContent = summary.title;
-        const repo = document.createElement("div");
+        const rowIcon = doc.createElement("span");
+        rowIcon.className = "pr-icon";
+        rowIcon.setAttribute("aria-hidden", "true");
+        rowIcon.textContent = "\u2442";
+        const rowCopy = doc.createElement("span");
+        rowCopy.className = "row-copy";
+        const repo = doc.createElement("span");
         repo.className = "repo";
         repo.textContent = `${summary.owner}/${summary.repo} #${summary.number}`;
-        left.append(title, repo);
-        const status = document.createElement("div");
-        status.className = "badge";
-        status.textContent = `My status: ${record.status.replaceAll("_", " ")}`;
-        main.append(left, status);
-        const badges = document.createElement("div");
-        badges.className = "badges";
-        badges.append(
+        const title = doc.createElement("span");
+        title.className = "title";
+        title.textContent = summary.title;
+        const details = doc.createElement("span");
+        details.className = "row-details";
+        if (summary.updatedAt) {
+          const updated = doc.createElement("span");
+          updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
+          details.append(updated);
+        }
+        details.append(
           makeBadge("Review", summary.review || "unknown"),
           makeBadge("Checks", summary.checks || "unknown"),
-          makeBadge("Merge", summary.merge || "unknown"),
-          makeBadge("Draft", summary.draft ? "yes" : "no")
+          makeBadge("Merge", summary.merge || "unknown")
         );
-        rowButton.append(main, badges);
-        row.append(rowButton);
+        if (summary.draft) {
+          details.append(makeBadge("Draft", "draft"));
+        }
+        if (record.status === "blocked" && record.blockedBy) {
+          const blocker = doc.createElement("span");
+          blocker.className = "blocker-preview";
+          blocker.textContent = `Blocked by ${record.blockedBy}`;
+          rowCopy.append(repo, title, details, blocker);
+        } else {
+          rowCopy.append(repo, title, details);
+        }
+        rowButton.append(rowIcon, rowCopy);
+        const quickStatus = doc.createElement("label");
+        quickStatus.className = "quick-status";
+        quickStatus.dataset.status = record.status;
+        const quickLabel = doc.createElement("span");
+        quickLabel.className = "sr-only";
+        quickLabel.textContent = `Personal status for ${summary.title}`;
+        const statusSelect = makeStatusSelect(record.status);
+        statusSelect.className = "status-select";
+        statusSelect.addEventListener("change", () => handlers.onQuickStatus(summary.key, statusSelect.value));
+        quickStatus.append(quickLabel, statusSelect);
+        row.append(rowButton, quickStatus);
         if (record.tags.length) {
-          const tags = document.createElement("div");
-          tags.className = "tags";
+          const tags = doc.createElement("div");
+          tags.className = "tags row-tags";
           for (const tag of record.tags) {
             const tagButton = makeTagButton(tag, {
               ariaLabel: `Filter by tag ${tag.name}`,
-              onClick(event) {
-                event.stopPropagation();
+              onClick() {
                 handlers.onTagFilter(tag.name);
               }
             });
@@ -980,6 +1426,7 @@
       }
     }
     function renderDrawer(state) {
+      shell.classList.toggle("has-drawer", Boolean(state.selectedKey));
       drawer.hidden = !state.selectedKey;
       if (!state.selectedKey) {
         void flushPending(currentSelectedKey);
@@ -991,20 +1438,20 @@
       const record = state.records[state.selectedKey] || DEFAULT_RECORD;
       currentSelectedKey = state.selectedKey;
       drawer.textContent = "";
-      const header = document.createElement("div");
+      const header = doc.createElement("div");
       header.className = "drawer-header";
-      const titleWrap = document.createElement("div");
-      const title = document.createElement("div");
-      title.className = "title";
-      title.textContent = summary?.title || state.selectedKey;
-      const subtitle = document.createElement("div");
-      subtitle.className = "repo";
-      subtitle.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
-      titleWrap.append(title, subtitle);
-      const close = document.createElement("button");
+      const headerText = doc.createElement("div");
+      const drawerTitle = doc.createElement("h2");
+      drawerTitle.textContent = "Personal tracking";
+      const drawerSubtitle = doc.createElement("div");
+      drawerSubtitle.className = "drawer-subtitle";
+      drawerSubtitle.textContent = "Saved only in this browser";
+      headerText.append(drawerTitle, drawerSubtitle);
+      const close = doc.createElement("button");
       close.type = "button";
-      close.className = "action-btn";
-      close.textContent = "Close";
+      close.className = "icon-btn";
+      close.textContent = "\xD7";
+      close.setAttribute("aria-label", "Close personal tracking panel");
       close.addEventListener("click", async () => {
         await flushPending(state.selectedKey);
         handlers.onSelect(null);
@@ -1012,78 +1459,66 @@
           focusedBeforeDrawer.focus();
         }
       });
-      header.append(titleWrap, close);
-      const statusField = document.createElement("label");
-      statusField.textContent = "My status";
-      const statusSelect = document.createElement("select");
+      header.append(headerText, close);
+      const identity = doc.createElement("div");
+      identity.className = "drawer-identity";
+      const identityTitle = doc.createElement("div");
+      identityTitle.className = "title";
+      identityTitle.textContent = summary?.title || state.selectedKey;
+      const identityRepo = doc.createElement("div");
+      identityRepo.className = "repo";
+      identityRepo.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
+      identity.append(identityTitle, identityRepo);
+      const statusField = makeField("My status");
+      const statusSelect = makeStatusSelect(record.status);
       statusSelect.setAttribute("data-focus-id", "status");
-      for (const status of ["unsorted", "next_up", "waiting", "blocked", "done"]) {
-        const option = document.createElement("option");
-        option.value = status;
-        option.textContent = status.replaceAll("_", " ");
-        option.selected = record.status === status;
-        statusSelect.append(option);
-      }
-      const blockerField = document.createElement("label");
-      blockerField.textContent = "Blocked by";
-      const blockerInput = document.createElement("input");
+      const blockerField = makeField("Blocked by");
+      const blockerInput = doc.createElement("input");
       blockerInput.type = "text";
+      blockerInput.placeholder = "Person, team, decision, or dependency";
       blockerInput.value = record.blockedBy;
-      blockerInput.hidden = record.status !== "blocked";
+      blockerField.hidden = record.status !== "blocked";
       blockerInput.setAttribute("data-focus-id", "blockedBy");
       blockerInput.addEventListener("input", () => queueSave(state.selectedKey, { blockedBy: blockerInput.value }));
-      blockerInput.addEventListener("blur", () => {
-        void flushPending(state.selectedKey);
-      });
+      blockerInput.addEventListener("blur", () => void flushPending(state.selectedKey));
       blockerField.append(blockerInput);
       statusSelect.addEventListener("change", () => {
         queueSave(state.selectedKey, { status: statusSelect.value });
-        blockerInput.hidden = statusSelect.value !== "blocked";
+        blockerField.hidden = statusSelect.value !== "blocked";
         if (statusSelect.value === "blocked") {
           blockerInput.focus();
         }
       });
       statusField.append(statusSelect);
-      const notesField = document.createElement("label");
-      notesField.textContent = "My notes";
-      const notesInput = document.createElement("textarea");
-      notesInput.rows = 8;
-      notesInput.value = record.notes;
-      notesInput.setAttribute("data-focus-id", "notes");
-      notesInput.addEventListener("input", () => queueSave(state.selectedKey, { notes: notesInput.value }));
-      notesInput.addEventListener("blur", () => {
-        void flushPending(state.selectedKey);
-      });
-      notesField.append(notesInput);
-      const tagsField = document.createElement("div");
-      const tagsLabel = document.createElement("div");
+      const tagsField = doc.createElement("div");
+      tagsField.className = "field";
+      const tagsLabel = doc.createElement("div");
+      tagsLabel.className = "field-label";
       tagsLabel.textContent = "Private tags";
-      const tagForm = document.createElement("form");
+      const tagForm = doc.createElement("form");
       tagForm.className = "tag-form";
-      const tagInput = document.createElement("input");
+      const tagInput = doc.createElement("input");
       tagInput.type = "text";
-      tagInput.placeholder = "Add tag";
+      tagInput.placeholder = "Add a tag";
       tagInput.setAttribute("aria-label", "Tag name");
       tagInput.setAttribute("data-focus-id", "tag-name");
-      const colorSelect = document.createElement("select");
+      const colorSelect = doc.createElement("select");
       colorSelect.setAttribute("aria-label", "Tag color");
       for (const color of TAG_COLORS) {
-        const option = document.createElement("option");
+        const option = doc.createElement("option");
         option.value = color;
         option.textContent = color;
         colorSelect.append(option);
       }
-      const addTag = document.createElement("button");
+      const addTag = makeActionButton("Add", null, "action-btn");
       addTag.type = "submit";
-      addTag.className = "action-btn";
-      addTag.textContent = "Add";
       tagForm.addEventListener("submit", (event) => {
         event.preventDefault();
         handlers.onAddTag(state.selectedKey, tagInput.value, colorSelect.value);
         tagInput.value = "";
       });
       tagForm.append(tagInput, colorSelect, addTag);
-      const existingTags = document.createElement("div");
+      const existingTags = doc.createElement("div");
       existingTags.className = "tags";
       for (const tag of record.tags) {
         const pill = makeTagButton(tag, {
@@ -1092,17 +1527,50 @@
             handlers.onRemoveTag(state.selectedKey, tag.name);
           }
         });
+        pill.title = "Remove private tag";
         existingTags.append(pill);
       }
-      const link = document.createElement("a");
+      tagsField.append(tagsLabel, tagForm, existingTags);
+      const notesField = makeField("My notes");
+      const notesInput = doc.createElement("textarea");
+      notesInput.rows = 7;
+      notesInput.placeholder = "Context, next steps, reminders\u2026";
+      notesInput.value = record.notes;
+      notesInput.setAttribute("data-focus-id", "notes");
+      notesInput.addEventListener("input", () => queueSave(state.selectedKey, { notes: notesInput.value }));
+      notesInput.addEventListener("blur", () => void flushPending(state.selectedKey));
+      notesField.append(notesInput);
+      const footer = doc.createElement("div");
+      footer.className = "drawer-footer";
+      const link = doc.createElement("a");
       link.className = "link-btn";
       link.href = summary?.url || "#";
       link.target = "_blank";
       link.rel = "noreferrer";
-      link.textContent = "Open pull request";
+      link.textContent = "Open pull request \u2197";
       saveState.textContent = state.saveState;
-      tagsField.append(tagsLabel, tagForm, existingTags);
-      drawer.append(header, saveState, statusField, blockerField, notesField, tagsField, link);
+      footer.append(saveState, link);
+      drawer.append(header, identity, statusField, blockerField, tagsField, notesField, footer);
+    }
+    function makeStatusSelect(selectedStatus) {
+      const select = doc.createElement("select");
+      for (const status of PERSONAL_STATUSES) {
+        const option = doc.createElement("option");
+        option.value = status;
+        option.textContent = STATUS_LABELS[status];
+        option.selected = selectedStatus === status;
+        select.append(option);
+      }
+      return select;
+    }
+    function makeField(labelText) {
+      const field = doc.createElement("label");
+      field.className = "field";
+      const label = doc.createElement("span");
+      label.className = "field-label";
+      label.textContent = labelText;
+      field.append(label);
+      return field;
     }
     function queueSave(key, patch) {
       if (!key) {
@@ -1122,7 +1590,7 @@
       }
       entry.patch = { ...entry.patch, ...patch };
       handlers.onLocalPatch?.(key, patch);
-      setSaveState("Saving...");
+      setSaveState("Saving\u2026");
       entry.debounced();
     }
     async function flushPending(key = null) {
@@ -1197,13 +1665,14 @@
       }
     }
     function makeBadge(label, value) {
-      const badge = document.createElement("span");
+      const badge = doc.createElement("span");
       badge.className = "badge";
-      badge.textContent = `${label}: ${value.replace?.("_", " ") || value}`;
+      badge.dataset.state = value;
+      badge.textContent = `${label}: ${String(value).replaceAll("_", " ")}`;
       return badge;
     }
     function makeTagButton(tag, { onClick, ariaLabel }) {
-      const pill = document.createElement("button");
+      const pill = doc.createElement("button");
       pill.type = "button";
       pill.className = "tag-pill";
       pill.textContent = tag.name;
@@ -1215,14 +1684,50 @@
       pill.addEventListener("click", onClick);
       return pill;
     }
-    return { render, shadow, flushPending, setSaveState };
-    function makeActionButton(onClick) {
-      const button = document.createElement("button");
+    function makeActionButton(label, onClick, className) {
+      const button = doc.createElement("button");
       button.type = "button";
-      button.className = "action-btn";
-      button.addEventListener("click", onClick);
+      button.className = className;
+      button.textContent = label;
+      if (onClick) {
+        button.addEventListener("click", onClick);
+      }
       return button;
     }
+    return { render, shadow, flushPending, setSaveState };
+  }
+  function countStatuses(state) {
+    const counts = Object.fromEntries(PERSONAL_STATUSES.map((status) => [status, 0]));
+    for (const summary of state.allSummaries) {
+      const status = (state.records[summary.key] || DEFAULT_RECORD).status;
+      counts[status] += 1;
+    }
+    counts.active = state.allSummaries.length - counts.done;
+    return counts;
+  }
+  function formatCount(count) {
+    return `${count} pull request${count === 1 ? "" : "s"}`;
+  }
+  function formatRelativeTime(value) {
+    const timestamp = new Date(value).getTime();
+    if (!Number.isFinite(timestamp)) {
+      return value;
+    }
+    const elapsedSeconds = Math.round((timestamp - Date.now()) / 1e3);
+    const units = [
+      ["year", 60 * 60 * 24 * 365],
+      ["month", 60 * 60 * 24 * 30],
+      ["day", 60 * 60 * 24],
+      ["hour", 60 * 60],
+      ["minute", 60]
+    ];
+    const formatter = new Intl.RelativeTimeFormat(void 0, { numeric: "auto" });
+    for (const [unit, seconds] of units) {
+      if (Math.abs(elapsedSeconds) >= seconds) {
+        return formatter.format(Math.round(elapsedSeconds / seconds), unit);
+      }
+    }
+    return "just now";
   }
 
   // src/app.js
@@ -1245,6 +1750,8 @@
     let host = null;
     let ui = null;
     let hiddenElements = [];
+    let hiddenLayoutElements = [];
+    let layoutStyleSnapshots = [];
     let mountedMain = null;
     let unsubscribe = null;
     let trackerRouteActive = false;
@@ -1290,6 +1797,7 @@
         entry.node.hidden = true;
         entry.node.setAttribute("data-pr-tracker-hidden", "true");
       }
+      adaptNativeLayout(main);
       if (!host) {
         host = doc.createElement("section");
         host.id = "tm-pr-tracker-root";
@@ -1309,7 +1817,52 @@
         }
       }
       hiddenElements = [];
+      restoreNativeLayout();
       mountedMain = null;
+    }
+    function adaptNativeLayout(main) {
+      const parent = main.parentElement;
+      if (!parent || parent === doc.body || parent === doc.documentElement) {
+        return;
+      }
+      const siblings = [...parent.children].filter((node) => node !== main && node instanceof HTMLElement);
+      const semanticSiblings = siblings.filter(
+        (node) => node.matches('aside, [role="complementary"], [data-testid*="sidebar" i], [class*="sidebar" i]')
+      );
+      const computedDisplay = win.getComputedStyle?.(parent)?.display;
+      const layoutSiblings = semanticSiblings.length ? semanticSiblings : computedDisplay === "grid" && siblings.length <= 2 ? siblings : [];
+      for (const node of layoutSiblings) {
+        hiddenLayoutElements.push({ node, hidden: node.hidden });
+        node.hidden = true;
+        node.setAttribute("data-pr-tracker-layout-hidden", "true");
+      }
+      if (!layoutSiblings.length) {
+        return;
+      }
+      for (const element of [parent, main]) {
+        layoutStyleSnapshots.push({ element, style: element.getAttribute("style") });
+      }
+      parent.style.gridTemplateColumns = "minmax(0, 1fr)";
+      main.style.gridColumn = "1 / -1";
+      main.style.width = "100%";
+      main.style.maxWidth = "none";
+    }
+    function restoreNativeLayout() {
+      for (const entry of hiddenLayoutElements) {
+        if (entry.node.getAttribute("data-pr-tracker-layout-hidden") === "true") {
+          entry.node.hidden = entry.hidden;
+          entry.node.removeAttribute("data-pr-tracker-layout-hidden");
+        }
+      }
+      hiddenLayoutElements = [];
+      for (const snapshot of layoutStyleSnapshots) {
+        if (snapshot.style === null) {
+          snapshot.element.removeAttribute("style");
+        } else {
+          snapshot.element.setAttribute("style", snapshot.style);
+        }
+      }
+      layoutStyleSnapshots = [];
     }
     function unmount() {
       void ui?.flushPending();
@@ -1471,6 +2024,9 @@
         },
         onStatusFilter(status) {
           state.statusFilter = status;
+          if (status === "done") {
+            state.showCompleted = true;
+          }
           state.filteredSummaries = computeFiltered();
           render();
         },
@@ -1502,6 +2058,24 @@
             setSaveState(`Error: ${error.message}`);
           }
         },
+        async onQuickStatus(key, status) {
+          const previous = state.records[key] || DEFAULT_RECORD;
+          const timestamp = now();
+          state.records[key] = { ...previous, status, modifiedAt: timestamp };
+          if (status === "blocked") {
+            state.selectedKey = key;
+          }
+          state.filteredSummaries = computeFiltered();
+          render();
+          try {
+            await storage.upsertRecord(key, { status }, timestamp);
+            setSaveState("Saved");
+          } catch (error) {
+            state.records[key] = previous;
+            state.warning = `Could not save status. ${error.message}`;
+            render();
+          }
+        },
         onLocalPatch(key, patch) {
           state.records[key] = { ...state.records[key] || DEFAULT_RECORD, ...patch };
         },
@@ -1530,7 +2104,6 @@
       state.filteredSummaries = computeFiltered();
       ui.render({
         ...state,
-        visibleStatuses: getVisibleStatusOptions(state.showCompleted),
         styles
       });
     }
