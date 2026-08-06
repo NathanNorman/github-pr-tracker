@@ -31,9 +31,13 @@ function makeGm(initialValue = null) {
 }
 
 test("normalizeEnvelope namespaces records for account", () => {
-  const envelope = normalizeEnvelope({ records: { "acme/api#1": { status: "next_up" } } }, "octocat");
+  const envelope = normalizeEnvelope({
+    records: { "acme/api#1": { status: "next_up" } },
+    detailCache: { "acme/api#1": { updatedAt: 4, parserVersion: 2, detail: { checks: "passing" } } }
+  }, "octocat");
   assert.equal(envelope.accountLogin, "octocat");
   assert.equal(envelope.records["acme/api#1"].status, "next_up");
+  assert.equal(envelope.detailCache["acme/api#1"].parserVersion, 2);
 });
 
 test("import merges newest modifiedAt without deleting unmatched records", async () => {

@@ -73,6 +73,45 @@ test("detail parser stays unknown for historical timeline text", async () => {
   });
 });
 
+test("detail parser reads GitHub's current embedded draft and reviewer sidebar", async () => {
+  const doc = parseHtml(await fixture("detail-current-github.html"), "https://github.com/acme/api/pull/12");
+  assert.deepEqual(parsePrDetailDocument(doc), {
+    review: "changes_requested",
+    checks: "unknown",
+    merge: "unknown",
+    draft: true
+  });
+  assert.equal(
+    findDeferredStatusEndpoint(doc, "https://github.com/acme/api/pull/12"),
+    "https://github.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
+  );
+});
+
+test("detail parser reads current GitHub check rollup fragments", async () => {
+  assert.equal(parsePrDetailDocument(parseHtml(await fixture("detail-checks-current.html"))).checks, "failing");
+  assert.equal(
+    parsePrDetailDocument(
+      parseHtml('<details class="commit-build-statuses"><summary class="hx_dot-fill-pending-icon"><svg aria-label="21 / 28 checks OK"></svg></summary></details>')
+    ).checks,
+    "pending"
+  );
+  assert.equal(
+    parsePrDetailDocument(
+      parseHtml('<details class="commit-build-statuses"><summary class="color-fg-success"><svg aria-label="1 / 1 checks OK"></svg></summary></details>')
+    ).checks,
+    "passing"
+  );
+});
+
+test("detail parser reads current GitHub reviewer approval text", () => {
+  const doc = parseHtml(`
+    <div data-url="/acme/api/issues/12/show_partial?partial=pull_requests%2Fsidebar%2Fshow%2Freviewers">
+      <h3>Reviewers</h3><tool-tip>sam approved these changes</tool-tip>
+    </div>
+  `);
+  assert.equal(parsePrDetailDocument(doc).review, "approved");
+});
+
 test("parsePrDetailPayload maps uppercase current-state values", () => {
   assert.deepEqual(
     parsePrDetailPayload({

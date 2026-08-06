@@ -1,4 +1,4 @@
-import { DETAIL_CACHE_TTL_MS, DEFAULT_RECORD } from "./constants.js";
+import { DETAIL_CACHE_TTL_MS, DETAIL_PARSER_VERSION, DEFAULT_RECORD } from "./constants.js";
 import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "./detail-parser.js";
 import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl } from "./github.js";
 import { filterSummaries, normalizeTags } from "./models.js";
@@ -110,15 +110,30 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     }
 
     const siblings = [...parent.children].filter((node) => node !== main && node instanceof HTMLElement);
+    const mainRect = main.getBoundingClientRect();
+    const isGlobalChrome = (node) =>
+      node.matches('header, footer, [role="banner"], [role="contentinfo"]') ||
+      Boolean(node.querySelector('header, [role="banner"], nav[aria-label="Global"]'));
     const semanticSiblings = siblings.filter((node) =>
-      node.matches('aside, [role="complementary"], [data-testid*="sidebar" i], [class*="sidebar" i]')
+      !isGlobalChrome(node) && node.matches('aside, [role="complementary"]')
     );
-    const computedDisplay = win.getComputedStyle?.(parent)?.display;
+    const geometricSiblings = siblings.filter((node) => {
+      if (isGlobalChrome(node)) {
+        return false;
+      }
+      const rect = node.getBoundingClientRect();
+      return (
+        mainRect.width > 0 &&
+        rect.width >= 200 &&
+        rect.width <= 640 &&
+        rect.height >= 48 &&
+        rect.left >= mainRect.right - 8 &&
+        rect.top >= mainRect.top - 8
+      );
+    });
     const layoutSiblings = semanticSiblings.length
       ? semanticSiblings
-      : computedDisplay === "grid" && siblings.length <= 2
-        ? siblings
-        : [];
+      : geometricSiblings;
 
     for (const node of layoutSiblings) {
       hiddenLayoutElements.push({ node, hidden: node.hidden });
@@ -201,9 +216,13 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         const enriched = await mapLimit(summaries, 4, async (summary) => {
           try {
             const cached = detailCache[summary.key];
-            const shouldUseCache = !force && cached && now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
+            const shouldUseCache =
+              !force &&
+              cached &&
+              cached.parserVersion === DETAIL_PARSER_VERSION &&
+              now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
             const detail = shouldUseCache ? cached.detail : await fetchDetail(summary);
-            detailCache[summary.key] = { updatedAt: now(), detail };
+            detailCache[summary.key] = { updatedAt: now(), parserVersion: DETAIL_PARSER_VERSION, detail };
             return {
               ...summary,
               ...mergeSummaryDetail(summary, detail)
@@ -279,7 +298,11 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       if (contentType.includes("application/json")) {
         deferredDetail = parsePrDetailPayload(await response.json());
       } else {
-        deferredDetail = parsePrDetailDocument(parser(await response.text()));
+        const body = await response.text();
+        deferredDetail = parsePrDetailDocument(parser(body));
+        if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
+          deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
+        }
       }
       return mergeNativeDetails(detail, deferredDetail);
     } catch {

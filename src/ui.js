@@ -227,11 +227,9 @@ export function createUi(container, handlers) {
         updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
         details.append(updated);
       }
-      details.append(
-        makeBadge("Review", summary.review || "unknown"),
-        makeBadge("Checks", summary.checks || "unknown"),
-        makeBadge("Merge", summary.merge || "unknown")
-      );
+      appendKnownBadge(details, "Review", summary.review);
+      appendKnownBadge(details, "Checks", summary.checks);
+      appendKnownBadge(details, "Merge", summary.merge);
       if (summary.draft) {
         details.append(makeBadge("Draft", "draft"));
       }
@@ -547,6 +545,12 @@ export function createUi(container, handlers) {
     badge.dataset.state = value;
     badge.textContent = `${label}: ${String(value).replaceAll("_", " ")}`;
     return badge;
+  }
+
+  function appendKnownBadge(target, label, value) {
+    if (value && value !== "unknown") {
+      target.append(makeBadge(label, value));
+    }
   }
 
   function makeTagButton(tag, { onClick, ariaLabel }) {

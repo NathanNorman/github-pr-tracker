@@ -256,6 +256,7 @@ test("detail refresh merges deferred fields and preserves list draft flag", asyn
   assert.equal(summary.checks, "passing");
   assert.equal(summary.merge, "blocked");
   assert.equal(summary.draft, true);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, 2);
 });
 
 test("invalid nested buttons are avoided and row selection remains keyboard-accessible", async () => {
@@ -285,6 +286,7 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
   await app.init();
   const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
   assert.equal(shadow.querySelectorAll("button button").length, 0);
+  assert.doesNotMatch(shadow.querySelector(".tracker-root").textContent, /unknown/i);
   const rowButton = shadow.querySelector(".pr-row-select");
   rowButton.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.equal(app.getState().selectedKey, "acme/api#1");
@@ -405,8 +407,11 @@ test("unmount restores original hidden state exactly", async () => {
   layout.style.gridTemplateColumns = "minmax(0, 1fr) 320px";
   const sidebar = dom.window.document.createElement("aside");
   sidebar.textContent = "Native GitHub sidebar";
+  const githubHeader = dom.window.document.createElement("header");
+  githubHeader.setAttribute("role", "banner");
+  githubHeader.textContent = "Native GitHub header";
   dom.window.document.body.insertBefore(layout, main);
-  layout.append(main, sidebar);
+  layout.append(githubHeader, main, sidebar);
   const hiddenChild = dom.window.document.createElement("div");
   hiddenChild.id = "was-hidden";
   hiddenChild.hidden = true;
@@ -424,11 +429,13 @@ test("unmount restores original hidden state exactly", async () => {
   });
   await app.init();
   assert.equal(sidebar.hidden, true);
+  assert.equal(githubHeader.hidden, false);
   assert.equal(main.style.gridColumn, "1 / -1");
   dom.window.history.pushState({}, "", "/pulls");
   await app.handleRoute();
   assert.equal(hiddenChild.hidden, true);
   assert.equal(sidebar.hidden, false);
+  assert.equal(githubHeader.hidden, false);
   assert.equal(main.getAttribute("style"), null);
   assert.equal(layout.style.gridTemplateColumns, "minmax(0, 1fr) 320px");
 });

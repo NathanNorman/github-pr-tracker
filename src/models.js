@@ -93,6 +93,7 @@ export function normalizeDetailCache(rawCache) {
     }
     cache[key] = {
       updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : 0,
+      parserVersion: Number.isFinite(value.parserVersion) ? value.parserVersion : 0,
       detail: value.detail && typeof value.detail === "object" ? value.detail : {}
     };
   }

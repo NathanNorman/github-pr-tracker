@@ -61,7 +61,15 @@ export function parsePrDetailPayload(payload) {
   const reviewState = payload.reviewDecision || payload.review_state || payload.currentReviewState;
   const checksState = payload.statusCheckRollup?.state || payload.checks_state || payload.checkState;
   const mergeState = payload.mergeStateStatus || payload.merge_state || payload.mergeState;
-  const draft = typeof payload.isDraft === "boolean" ? payload.isDraft : typeof payload.draft === "boolean" ? payload.draft : undefined;
+  const draft = typeof payload.isDraft === "boolean"
+    ? payload.isDraft
+    : typeof payload.draft === "boolean"
+      ? payload.draft
+      : payload.state === "DRAFT"
+        ? true
+        : payload.state === "OPEN"
+          ? false
+          : undefined;
   if (!reviewState && !checksState && !mergeState && typeof draft !== "boolean") {
     return null;
   }
@@ -76,7 +84,13 @@ export function parsePrDetailPayload(payload) {
 function findEmbeddedPayload(doc) {
   for (const script of doc.querySelectorAll("script")) {
     const text = script.textContent || "";
-    if (!text.includes("reviewDecision") && !text.includes("statusCheckRollup") && !text.includes("mergeStateStatus")) {
+    const isCurrentEmbeddedData = script.matches('script[type="application/json"][data-target*="embeddedData"]');
+    if (
+      !isCurrentEmbeddedData &&
+      !text.includes("reviewDecision") &&
+      !text.includes("statusCheckRollup") &&
+      !text.includes("mergeStateStatus")
+    ) {
       continue;
     }
     const matches = text.match(/\{[\s\S]*\}/g) || [];
@@ -95,23 +109,47 @@ function detailFromDom(doc) {
   let review = "unknown";
   let checks = "unknown";
   let merge = "unknown";
-  const reviewText = doc.querySelector('[data-test-selector="required-review-banner"], [aria-label*="review"], [data-review-state]')?.textContent || "";
-  if (/changes requested/i.test(reviewText)) {
+  const currentReviewRoot =
+    doc.querySelector('[data-url*="pull_requests%2Fsidebar%2Fshow%2Freviewers"]') ||
+    doc.querySelector('form[id^="pull-request-reviewers-form-"]') ||
+    doc.querySelector('[data-test-selector="required-review-banner"], [data-review-state]');
+  const reviewText = currentReviewRoot
+    ? [
+        currentReviewRoot.textContent,
+        ...[...currentReviewRoot.querySelectorAll("tool-tip, [aria-label]")].map(
+          (node) => `${node.getAttribute("aria-label") || ""} ${node.textContent || ""}`
+        )
+      ].join(" ")
+    : "";
+  if (/changes requested|requested changes/i.test(reviewText)) {
     review = "changes_requested";
-  } else if (/approved/i.test(reviewText)) {
+  } else if (/approved(?: these changes)?/i.test(reviewText)) {
     review = "approved";
-  } else if (/review required|required review/i.test(reviewText)) {
+  } else if (/review required|required review|review requested/i.test(reviewText)) {
     review = "required";
   } else if (/no reviews/i.test(reviewText)) {
     review = "none";
   }
 
-  const checksText = doc.querySelector('[data-mergeability-message], [aria-label*="checks"], [data-checks-state]')?.textContent || "";
-  if (/failing|failed/.test(checksText.toLowerCase())) {
+  const checkNodes = [
+    ...doc.querySelectorAll(
+      '.commit-build-statuses summary, [data-deferred-details-content-url*="/status-details"], [data-mergeability-message], [aria-label*="checks" i], [data-checks-state]'
+    )
+  ];
+  const checksText = checkNodes.map((node) => {
+    const labelled = [node, ...node.querySelectorAll("[aria-label]")];
+    return [
+      node.className,
+      node.getAttribute("data-checks-state"),
+      node.textContent,
+      ...labelled.map((item) => item.getAttribute("aria-label"))
+    ].filter(Boolean).join(" ");
+  }).join(" ");
+  if (/color-fg-danger|octicon-x|failing|failed|checks? not successful/i.test(checksText)) {
     checks = "failing";
-  } else if (/pending|expected|running/.test(checksText.toLowerCase())) {
+  } else if (/hx_dot-fill-pending-icon|pending|expected|running|in progress/i.test(checksText)) {
     checks = "pending";
-  } else if (/successful|passed|all checks have passed/.test(checksText.toLowerCase())) {
+  } else if (/color-fg-success|successful|passed|all checks have passed|\d+\s*\/\s*\d+ checks OK/i.test(checksText)) {
     checks = "passing";
   } else if (/no checks/i.test(checksText)) {
     checks = "none";
@@ -152,7 +190,10 @@ export function findDeferredStatusEndpoint(doc, baseUrl = "https://github.com") 
   for (const attribute of candidateAttributes) {
     for (const node of doc.querySelectorAll(`[${attribute}]`)) {
       const value = node.getAttribute(attribute);
-      if (!value || !/\/pull\/\d+\/(?:checks|status|merge|review|details)/.test(value)) {
+      if (
+        !value ||
+        !/\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)/.test(value)
+      ) {
         continue;
       }
       const resolved = new URL(value, baseUrl).href;
@@ -164,7 +205,9 @@ export function findDeferredStatusEndpoint(doc, baseUrl = "https://github.com") 
 
   for (const script of doc.querySelectorAll("script")) {
     const text = script.textContent || "";
-    const match = text.match(/https:\/\/github\.com\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details)[^"'\\s]*/);
+    const match = text.match(
+      /https:\/\/github\.com\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/
+    );
     if (match) {
       return match[0];
     }
