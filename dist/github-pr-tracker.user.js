@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.1.1
+// @version      1.2.0
 // @description  Personal pull request tracker for your own open GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
@@ -666,16 +666,16 @@ select {
 }
 .tracker-root {
   width: 100%;
-  max-width: 1560px;
+  max-width: 1480px;
   margin: 0 auto;
-  padding: 28px 24px 48px;
+  padding: 24px 24px 56px;
 }
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 28px;
-  margin: 0 0 24px;
+  margin: 0 0 20px;
 }
 .page-heading {
   min-width: 0;
@@ -683,7 +683,7 @@ select {
 .page-heading h1 {
   margin: 0;
   color: var(--fgColor-default, #1f2328);
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.25;
@@ -696,9 +696,11 @@ select {
   color: var(--fgColor-muted, #59636e);
 }
 .privacy-note::before {
-  content: "\u25A3";
+  content: "\u25CF";
   margin-right: 6px;
-  font-size: 11px;
+  color: var(--fgColor-success, #1a7f37);
+  font-size: 8px;
+  vertical-align: 2px;
 }
 .page-header input[type="search"] {
   width: min(360px, 38vw);
@@ -716,12 +718,12 @@ select {
 }
 .tracker-shell {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: 172px minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
 }
 .tracker-shell.has-drawer {
-  grid-template-columns: 180px minmax(0, 1fr) minmax(320px, 360px);
+  grid-template-columns: 172px minmax(0, 1fr) minmax(340px, 380px);
 }
 .status-sidebar {
   position: sticky;
@@ -766,6 +768,29 @@ select {
   box-shadow: inset 3px 0 0 var(--borderColor-accent-emphasis, #0969da);
   font-weight: 600;
 }
+.filter-label::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--fgColor-muted, #59636e);
+  vertical-align: 1px;
+}
+.filter-btn[data-status="all"] .filter-label::before,
+.filter-btn[data-status="next_up"] .filter-label::before {
+  background: var(--fgColor-accent, #0969da);
+}
+.filter-btn[data-status="waiting"] .filter-label::before {
+  background: var(--fgColor-attention, #9a6700);
+}
+.filter-btn[data-status="blocked"] .filter-label::before {
+  background: var(--fgColor-danger, #d1242f);
+}
+.filter-btn[data-status="done"] .filter-label::before {
+  background: var(--fgColor-success, #1a7f37);
+}
 .filter-count {
   min-width: 26px;
   padding: 1px 7px;
@@ -788,8 +813,23 @@ select {
 .sidebar-action[aria-pressed="true"] {
   color: var(--fgColor-accent, #0969da);
 }
-.data-label {
-  margin-top: 18px;
+.backup-menu {
+  margin-top: 14px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 13px;
+}
+.backup-menu summary {
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+.backup-menu summary:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.16));
+}
+.backup-actions {
+  margin-top: 3px;
+  padding-left: 10px;
 }
 .panel,
 .drawer {
@@ -863,21 +903,22 @@ select {
 .pr-row-select {
   grid-area: select;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 13px;
   width: 100%;
   min-width: 0;
-  padding: 15px 12px 12px 16px;
+  padding: 14px 12px 12px 16px;
   border: 0;
   background: transparent;
   color: inherit;
   text-align: left;
 }
 .pr-icon {
-  padding-top: 18px;
-  color: var(--fgColor-muted, #59636e);
-  font-size: 20px;
-  line-height: 1;
+  width: 10px;
+  height: 10px;
+  margin-top: 21px;
+  border: 2px solid var(--fgColor-open, var(--fgColor-success, #1a7f37));
+  border-radius: 50%;
 }
 .row-copy {
   display: block;
@@ -888,6 +929,27 @@ select {
 .row-details,
 .blocker-preview {
   display: block;
+}
+.note-preview,
+.personal-hint {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-preview {
+  color: var(--fgColor-default, #1f2328);
+}
+.personal-hint {
+  color: var(--fgColor-muted, #59636e);
+  opacity: 0.72;
+}
+.pr-row:hover .personal-hint,
+.pr-row:focus-within .personal-hint {
+  color: var(--fgColor-accent, #0969da);
+  opacity: 1;
 }
 .title {
   overflow: hidden;
@@ -1002,7 +1064,7 @@ select {
 }
 .row-tags {
   grid-area: tags;
-  padding: 0 12px 12px 52px;
+  padding: 0 12px 12px 41px;
 }
 .tag-pill {
   min-height: 24px;
@@ -1059,6 +1121,9 @@ select {
 .field {
   display: grid;
   gap: 7px;
+}
+.field[hidden] {
+  display: none;
 }
 .field-label {
   color: var(--fgColor-default, #1f2328);
@@ -1141,7 +1206,7 @@ select {
 }
 @media (max-width: 1180px) {
   .tracker-shell.has-drawer {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 172px minmax(0, 1fr);
   }
   .drawer {
     position: fixed;
@@ -1225,15 +1290,15 @@ select {
     const pageSubtitle = doc.createElement("div");
     pageSubtitle.className = "page-subtitle";
     const subtitleText = doc.createElement("span");
-    subtitleText.textContent = "Personal workflow for pull requests you opened";
+    subtitleText.textContent = "A private workspace for pull requests you opened";
     const privacy = doc.createElement("span");
     privacy.className = "privacy-note";
-    privacy.textContent = "Private to this browser";
+    privacy.textContent = "Stored in this browser";
     pageSubtitle.append(subtitleText, privacy);
     heading.append(pageTitle, pageSubtitle);
     const search = doc.createElement("input");
     search.type = "search";
-    search.placeholder = "Search my pull requests";
+    search.placeholder = "Search PRs, notes, or private labels";
     search.setAttribute("aria-label", "Search pull requests");
     search.setAttribute("data-focus-id", "search");
     search.addEventListener("input", (event) => handlers.onSearch(event.target.value));
@@ -1245,7 +1310,7 @@ select {
     sidebar.setAttribute("aria-label", "Personal status filters");
     const sidebarLabel = doc.createElement("div");
     sidebarLabel.className = "eyebrow";
-    sidebarLabel.textContent = "My status";
+    sidebarLabel.textContent = "My workflow";
     const filters = doc.createElement("div");
     filters.className = "filters";
     const sidebarTools = doc.createElement("div");
@@ -1254,12 +1319,17 @@ select {
     viewLabel.className = "eyebrow";
     viewLabel.textContent = "View";
     const showCompleted = makeActionButton("", () => handlers.onToggleCompleted(), "sidebar-action");
-    const dataLabel = doc.createElement("div");
-    dataLabel.className = "eyebrow data-label";
-    dataLabel.textContent = "Local data";
     const exportButton = makeActionButton("Export backup", () => handlers.onExport(), "sidebar-action");
     const importButton = makeActionButton("Import backup", () => handlers.onImport(), "sidebar-action");
-    sidebarTools.append(viewLabel, showCompleted, dataLabel, exportButton, importButton);
+    const backupMenu = doc.createElement("details");
+    backupMenu.className = "backup-menu";
+    const backupSummary = doc.createElement("summary");
+    backupSummary.textContent = "Backup & restore";
+    const backupActions = doc.createElement("div");
+    backupActions.className = "backup-actions";
+    backupActions.append(exportButton, importButton);
+    backupMenu.append(backupSummary, backupActions);
+    sidebarTools.append(viewLabel, showCompleted, backupMenu);
     sidebar.append(sidebarLabel, filters, sidebarTools);
     const panel = doc.createElement("section");
     panel.className = "panel";
@@ -1388,7 +1458,6 @@ select {
         const rowIcon = doc.createElement("span");
         rowIcon.className = "pr-icon";
         rowIcon.setAttribute("aria-hidden", "true");
-        rowIcon.textContent = "\u2442";
         const rowCopy = doc.createElement("span");
         rowCopy.className = "row-copy";
         const repo = doc.createElement("span");
@@ -1417,6 +1486,17 @@ select {
           rowCopy.append(repo, title, details, blocker);
         } else {
           rowCopy.append(repo, title, details);
+        }
+        if (record.notes) {
+          const notePreview = doc.createElement("span");
+          notePreview.className = "note-preview";
+          notePreview.textContent = compactNote(record.notes);
+          rowCopy.append(notePreview);
+        } else if (!record.tags.length && !(record.status === "blocked" && record.blockedBy)) {
+          const personalHint = doc.createElement("span");
+          personalHint.className = "personal-hint";
+          personalHint.textContent = "Add notes, private labels, or blocker details";
+          rowCopy.append(personalHint);
         }
         rowButton.append(rowIcon, rowCopy);
         const quickStatus = doc.createElement("label");
@@ -1464,10 +1544,10 @@ select {
       header.className = "drawer-header";
       const headerText = doc.createElement("div");
       const drawerTitle = doc.createElement("h2");
-      drawerTitle.textContent = "Personal tracking";
+      drawerTitle.textContent = "Notes & tracking";
       const drawerSubtitle = doc.createElement("div");
       drawerSubtitle.className = "drawer-subtitle";
-      drawerSubtitle.textContent = "Saved only in this browser";
+      drawerSubtitle.textContent = "Private to this browser";
       headerText.append(drawerTitle, drawerSubtitle);
       const close = doc.createElement("button");
       close.type = "button";
@@ -1516,13 +1596,13 @@ select {
       tagsField.className = "field";
       const tagsLabel = doc.createElement("div");
       tagsLabel.className = "field-label";
-      tagsLabel.textContent = "Private tags";
+      tagsLabel.textContent = "Private labels";
       const tagForm = doc.createElement("form");
       tagForm.className = "tag-form";
       const tagInput = doc.createElement("input");
       tagInput.type = "text";
-      tagInput.placeholder = "Add a tag";
-      tagInput.setAttribute("aria-label", "Tag name");
+      tagInput.placeholder = "Add a label";
+      tagInput.setAttribute("aria-label", "Private label name");
       tagInput.setAttribute("data-focus-id", "tag-name");
       const colorSelect = doc.createElement("select");
       colorSelect.setAttribute("aria-label", "Tag color");
@@ -1569,7 +1649,7 @@ select {
       link.href = summary?.url || "#";
       link.target = "_blank";
       link.rel = "noreferrer";
-      link.textContent = "Open pull request \u2197";
+      link.textContent = "Open on GitHub \u2197";
       saveState.textContent = state.saveState;
       footer.append(saveState, link);
       drawer.append(header, identity, statusField, blockerField, tagsField, notesField, footer);
@@ -1755,6 +1835,10 @@ select {
       }
     }
     return "just now";
+  }
+  function compactNote(value) {
+    const text = String(value).replace(/\s+/g, " ").trim();
+    return text.length > 110 ? `Note \xB7 ${text.slice(0, 107)}\u2026` : `Note \xB7 ${text}`;
   }
 
   // src/app.js

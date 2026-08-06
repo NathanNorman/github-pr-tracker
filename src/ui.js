@@ -26,16 +26,16 @@ export function createUi(container, handlers) {
   const pageSubtitle = doc.createElement("div");
   pageSubtitle.className = "page-subtitle";
   const subtitleText = doc.createElement("span");
-  subtitleText.textContent = "Personal workflow for pull requests you opened";
+  subtitleText.textContent = "A private workspace for pull requests you opened";
   const privacy = doc.createElement("span");
   privacy.className = "privacy-note";
-  privacy.textContent = "Private to this browser";
+  privacy.textContent = "Stored in this browser";
   pageSubtitle.append(subtitleText, privacy);
   heading.append(pageTitle, pageSubtitle);
 
   const search = doc.createElement("input");
   search.type = "search";
-  search.placeholder = "Search my pull requests";
+  search.placeholder = "Search PRs, notes, or private labels";
   search.setAttribute("aria-label", "Search pull requests");
   search.setAttribute("data-focus-id", "search");
   search.addEventListener("input", (event) => handlers.onSearch(event.target.value));
@@ -48,7 +48,7 @@ export function createUi(container, handlers) {
   sidebar.setAttribute("aria-label", "Personal status filters");
   const sidebarLabel = doc.createElement("div");
   sidebarLabel.className = "eyebrow";
-  sidebarLabel.textContent = "My status";
+  sidebarLabel.textContent = "My workflow";
   const filters = doc.createElement("div");
   filters.className = "filters";
 
@@ -58,12 +58,17 @@ export function createUi(container, handlers) {
   viewLabel.className = "eyebrow";
   viewLabel.textContent = "View";
   const showCompleted = makeActionButton("", () => handlers.onToggleCompleted(), "sidebar-action");
-  const dataLabel = doc.createElement("div");
-  dataLabel.className = "eyebrow data-label";
-  dataLabel.textContent = "Local data";
   const exportButton = makeActionButton("Export backup", () => handlers.onExport(), "sidebar-action");
   const importButton = makeActionButton("Import backup", () => handlers.onImport(), "sidebar-action");
-  sidebarTools.append(viewLabel, showCompleted, dataLabel, exportButton, importButton);
+  const backupMenu = doc.createElement("details");
+  backupMenu.className = "backup-menu";
+  const backupSummary = doc.createElement("summary");
+  backupSummary.textContent = "Backup & restore";
+  const backupActions = doc.createElement("div");
+  backupActions.className = "backup-actions";
+  backupActions.append(exportButton, importButton);
+  backupMenu.append(backupSummary, backupActions);
+  sidebarTools.append(viewLabel, showCompleted, backupMenu);
   sidebar.append(sidebarLabel, filters, sidebarTools);
 
   const panel = doc.createElement("section");
@@ -211,7 +216,6 @@ export function createUi(container, handlers) {
       const rowIcon = doc.createElement("span");
       rowIcon.className = "pr-icon";
       rowIcon.setAttribute("aria-hidden", "true");
-      rowIcon.textContent = "⑂";
       const rowCopy = doc.createElement("span");
       rowCopy.className = "row-copy";
       const repo = doc.createElement("span");
@@ -240,6 +244,18 @@ export function createUi(container, handlers) {
         rowCopy.append(repo, title, details, blocker);
       } else {
         rowCopy.append(repo, title, details);
+      }
+
+      if (record.notes) {
+        const notePreview = doc.createElement("span");
+        notePreview.className = "note-preview";
+        notePreview.textContent = compactNote(record.notes);
+        rowCopy.append(notePreview);
+      } else if (!record.tags.length && !(record.status === "blocked" && record.blockedBy)) {
+        const personalHint = doc.createElement("span");
+        personalHint.className = "personal-hint";
+        personalHint.textContent = "Add notes, private labels, or blocker details";
+        rowCopy.append(personalHint);
       }
       rowButton.append(rowIcon, rowCopy);
 
@@ -296,10 +312,10 @@ export function createUi(container, handlers) {
     header.className = "drawer-header";
     const headerText = doc.createElement("div");
     const drawerTitle = doc.createElement("h2");
-    drawerTitle.textContent = "Personal tracking";
+    drawerTitle.textContent = "Notes & tracking";
     const drawerSubtitle = doc.createElement("div");
     drawerSubtitle.className = "drawer-subtitle";
-    drawerSubtitle.textContent = "Saved only in this browser";
+    drawerSubtitle.textContent = "Private to this browser";
     headerText.append(drawerTitle, drawerSubtitle);
 
     const close = doc.createElement("button");
@@ -354,13 +370,13 @@ export function createUi(container, handlers) {
     tagsField.className = "field";
     const tagsLabel = doc.createElement("div");
     tagsLabel.className = "field-label";
-    tagsLabel.textContent = "Private tags";
+    tagsLabel.textContent = "Private labels";
     const tagForm = doc.createElement("form");
     tagForm.className = "tag-form";
     const tagInput = doc.createElement("input");
     tagInput.type = "text";
-    tagInput.placeholder = "Add a tag";
-    tagInput.setAttribute("aria-label", "Tag name");
+    tagInput.placeholder = "Add a label";
+    tagInput.setAttribute("aria-label", "Private label name");
     tagInput.setAttribute("data-focus-id", "tag-name");
     const colorSelect = doc.createElement("select");
     colorSelect.setAttribute("aria-label", "Tag color");
@@ -410,7 +426,7 @@ export function createUi(container, handlers) {
     link.href = summary?.url || "#";
     link.target = "_blank";
     link.rel = "noreferrer";
-    link.textContent = "Open pull request ↗";
+    link.textContent = "Open on GitHub ↗";
     saveState.textContent = state.saveState;
     footer.append(saveState, link);
 
@@ -615,4 +631,9 @@ function formatRelativeTime(value) {
     }
   }
   return "just now";
+}
+
+function compactNote(value) {
+  const text = String(value).replace(/\s+/g, " ").trim();
+  return text.length > 110 ? `Note · ${text.slice(0, 107)}…` : `Note · ${text}`;
 }

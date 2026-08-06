@@ -25,16 +25,16 @@ select {
 }
 .tracker-root {
   width: 100%;
-  max-width: 1560px;
+  max-width: 1480px;
   margin: 0 auto;
-  padding: 28px 24px 48px;
+  padding: 24px 24px 56px;
 }
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 28px;
-  margin: 0 0 24px;
+  margin: 0 0 20px;
 }
 .page-heading {
   min-width: 0;
@@ -42,7 +42,7 @@ select {
 .page-heading h1 {
   margin: 0;
   color: var(--fgColor-default, #1f2328);
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.25;
@@ -55,9 +55,11 @@ select {
   color: var(--fgColor-muted, #59636e);
 }
 .privacy-note::before {
-  content: "▣";
+  content: "●";
   margin-right: 6px;
-  font-size: 11px;
+  color: var(--fgColor-success, #1a7f37);
+  font-size: 8px;
+  vertical-align: 2px;
 }
 .page-header input[type="search"] {
   width: min(360px, 38vw);
@@ -75,12 +77,12 @@ select {
 }
 .tracker-shell {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: 172px minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
 }
 .tracker-shell.has-drawer {
-  grid-template-columns: 180px minmax(0, 1fr) minmax(320px, 360px);
+  grid-template-columns: 172px minmax(0, 1fr) minmax(340px, 380px);
 }
 .status-sidebar {
   position: sticky;
@@ -125,6 +127,29 @@ select {
   box-shadow: inset 3px 0 0 var(--borderColor-accent-emphasis, #0969da);
   font-weight: 600;
 }
+.filter-label::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--fgColor-muted, #59636e);
+  vertical-align: 1px;
+}
+.filter-btn[data-status="all"] .filter-label::before,
+.filter-btn[data-status="next_up"] .filter-label::before {
+  background: var(--fgColor-accent, #0969da);
+}
+.filter-btn[data-status="waiting"] .filter-label::before {
+  background: var(--fgColor-attention, #9a6700);
+}
+.filter-btn[data-status="blocked"] .filter-label::before {
+  background: var(--fgColor-danger, #d1242f);
+}
+.filter-btn[data-status="done"] .filter-label::before {
+  background: var(--fgColor-success, #1a7f37);
+}
 .filter-count {
   min-width: 26px;
   padding: 1px 7px;
@@ -147,8 +172,23 @@ select {
 .sidebar-action[aria-pressed="true"] {
   color: var(--fgColor-accent, #0969da);
 }
-.data-label {
-  margin-top: 18px;
+.backup-menu {
+  margin-top: 14px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 13px;
+}
+.backup-menu summary {
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+.backup-menu summary:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.16));
+}
+.backup-actions {
+  margin-top: 3px;
+  padding-left: 10px;
 }
 .panel,
 .drawer {
@@ -222,21 +262,22 @@ select {
 .pr-row-select {
   grid-area: select;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 13px;
   width: 100%;
   min-width: 0;
-  padding: 15px 12px 12px 16px;
+  padding: 14px 12px 12px 16px;
   border: 0;
   background: transparent;
   color: inherit;
   text-align: left;
 }
 .pr-icon {
-  padding-top: 18px;
-  color: var(--fgColor-muted, #59636e);
-  font-size: 20px;
-  line-height: 1;
+  width: 10px;
+  height: 10px;
+  margin-top: 21px;
+  border: 2px solid var(--fgColor-open, var(--fgColor-success, #1a7f37));
+  border-radius: 50%;
 }
 .row-copy {
   display: block;
@@ -247,6 +288,27 @@ select {
 .row-details,
 .blocker-preview {
   display: block;
+}
+.note-preview,
+.personal-hint {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-preview {
+  color: var(--fgColor-default, #1f2328);
+}
+.personal-hint {
+  color: var(--fgColor-muted, #59636e);
+  opacity: 0.72;
+}
+.pr-row:hover .personal-hint,
+.pr-row:focus-within .personal-hint {
+  color: var(--fgColor-accent, #0969da);
+  opacity: 1;
 }
 .title {
   overflow: hidden;
@@ -361,7 +423,7 @@ select {
 }
 .row-tags {
   grid-area: tags;
-  padding: 0 12px 12px 52px;
+  padding: 0 12px 12px 41px;
 }
 .tag-pill {
   min-height: 24px;
@@ -418,6 +480,9 @@ select {
 .field {
   display: grid;
   gap: 7px;
+}
+.field[hidden] {
+  display: none;
 }
 .field-label {
   color: var(--fgColor-default, #1f2328);
@@ -500,7 +565,7 @@ select {
 }
 @media (max-width: 1180px) {
   .tracker-shell.has-drawer {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 172px minmax(0, 1fr);
   }
   .drawer {
     position: fixed;
