@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { ensureTrackerNav, fetchOpenPrs, isSameOriginGitHubUrl, parsePullListDocument } from "../src/github.js";
+import { ensureTrackerNav, fetchOpenPrs, isSameOriginGitHubUrl, isTrackerRoute, parsePullListDocument, trackerUrl } from "../src/github.js";
 import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "../src/detail-parser.js";
 import { parsePrUrl } from "../src/models.js";
 import { parseHtml } from "./helpers.js";
@@ -126,4 +126,14 @@ test("ensureTrackerNav targets the pulls nav and not unrelated navs", async () =
   const trackerLink = doc.getElementById("pr-tracker-nav-link");
   assert.ok(trackerLink);
   assert.equal(trackerLink.closest("nav").getAttribute("aria-label"), "Global");
+  assert.equal(trackerLink.getAttribute("href"), "/pulls/inbox#pr-tracker");
+});
+
+test("tracker route survives GitHub's canonical pulls inbox redirect", () => {
+  assert.equal(trackerUrl(), "/pulls/inbox#pr-tracker");
+  assert.equal(isTrackerRoute("https://github.com/pulls/inbox#pr-tracker"), true);
+  assert.equal(isTrackerRoute("https://github.com/pulls/inbox?pr_tracker=1"), true);
+  assert.equal(isTrackerRoute("https://github.com/pulls?pr_tracker=1"), true);
+  assert.equal(isTrackerRoute("https://github.com/pulls/inbox"), false);
+  assert.equal(isTrackerRoute("https://github.com/pulls/assigned#pr-tracker"), false);
 });

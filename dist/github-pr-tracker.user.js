@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Personal pull request tracker for your own open GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
@@ -458,10 +458,12 @@
   // src/github.js
   function isTrackerRoute(location) {
     const url = typeof location === "string" ? new URL(location, "https://github.com") : new URL(location.href);
-    return url.pathname === "/pulls" && url.searchParams.get("pr_tracker") === "1";
+    const isPullsRoute = url.pathname === "/pulls" || url.pathname === "/pulls/inbox";
+    const hasTrackerMarker = url.hash === "#pr-tracker" || url.searchParams.get("pr_tracker") === "1";
+    return isPullsRoute && hasTrackerMarker;
   }
   function trackerUrl() {
-    return "/pulls?pr_tracker=1";
+    return "/pulls/inbox#pr-tracker";
   }
   function detectCurrentLogin(doc = document) {
     const selectors = [
@@ -1648,6 +1650,7 @@
     const observer = new MutationObserver(() => rerun());
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", rerun);
+    window.addEventListener("hashchange", rerun);
     window.addEventListener("beforeunload", () => app.flushPending?.());
     document.addEventListener("pjax:end", rerun);
   }

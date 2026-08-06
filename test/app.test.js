@@ -210,7 +210,7 @@ test("refresh preserves concurrent personal edits made during fetch", async () =
     }
   });
   await app.init();
-  dom.window.history.pushState({}, "", "/pulls?pr_tracker=1");
+  dom.window.history.pushState({}, "", "/pulls/inbox#pr-tracker");
   const refreshPromise = app.refresh(true);
   await storage.upsertRecord("acme/api#1", { notes: "keep me" }, 99);
   releaseFetch();

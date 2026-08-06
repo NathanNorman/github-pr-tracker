@@ -39,6 +39,7 @@ async function bootstrap() {
   const observer = new MutationObserver(() => rerun());
   observer.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("popstate", rerun);
+  window.addEventListener("hashchange", rerun);
   window.addEventListener("beforeunload", () => app.flushPending?.());
   document.addEventListener("pjax:end", rerun);
 }

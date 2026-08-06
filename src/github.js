@@ -2,11 +2,13 @@ import { parsePrUrl } from "./models.js";
 
 export function isTrackerRoute(location) {
   const url = typeof location === "string" ? new URL(location, "https://github.com") : new URL(location.href);
-  return url.pathname === "/pulls" && url.searchParams.get("pr_tracker") === "1";
+  const isPullsRoute = url.pathname === "/pulls" || url.pathname === "/pulls/inbox";
+  const hasTrackerMarker = url.hash === "#pr-tracker" || url.searchParams.get("pr_tracker") === "1";
+  return isPullsRoute && hasTrackerMarker;
 }
 
 export function trackerUrl() {
-  return "/pulls?pr_tracker=1";
+  return "/pulls/inbox#pr-tracker";
 }
 
 export function detectCurrentLogin(doc = document) {
