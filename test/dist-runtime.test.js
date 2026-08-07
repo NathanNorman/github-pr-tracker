@@ -44,6 +44,7 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
   const host = window.document.querySelector("#tm-pr-tracker-root");
   assert.ok(host, errors.join("\n"));
   assert.ok(host.shadowRoot.querySelector(".sort-summary"), errors.join("\n"));
+  assert.ok(host.shadowRoot.querySelector(".filter-summary"), errors.join("\n"));
   assert.equal(host.shadowRoot.querySelector(".pr-group-title")?.textContent, "toast-analytics");
   assert.deepEqual(errors, []);
 });

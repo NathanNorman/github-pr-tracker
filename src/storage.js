@@ -2,6 +2,7 @@ import { APP_ID, DEFAULT_RECORD } from "./constants.js";
 import {
   mergeImportedRecords,
   normalizeEnvelope,
+  normalizeFilterPreferences,
   normalizeRecord,
   normalizeSortPreferences,
   validateImportEnvelope
@@ -64,6 +65,19 @@ export function createStorage(gm, login) {
     return envelope;
   }
 
+  async function updateFilterPreferences(filterPreferences) {
+    const envelope = await load();
+    envelope.filterPreferences = normalizeFilterPreferences({
+      ...envelope.filterPreferences,
+      ...filterPreferences
+    });
+    await save(envelope);
+    for (const listener of listeners) {
+      listener(envelope);
+    }
+    return envelope;
+  }
+
   async function importEnvelope(rawEnvelope) {
     validateImportEnvelope(rawEnvelope);
     if (rawEnvelope.accountLogin !== login) {
@@ -86,6 +100,7 @@ export function createStorage(gm, login) {
     subscribe,
     upsertRecord,
     updateSortPreferences,
+    updateFilterPreferences,
     importEnvelope
   };
 }

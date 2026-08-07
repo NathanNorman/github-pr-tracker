@@ -2,11 +2,13 @@ import { DETAIL_CACHE_TTL_MS, DETAIL_PARSER_VERSION, DEFAULT_RECORD } from "./co
 import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "./detail-parser.js";
 import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl, trackerSearchUrl } from "./github.js";
 import {
+  DEFAULT_FILTER_PREFERENCES,
   filterSummaries,
   getAvailableGroupOptions,
   getAvailableSortOptions,
   groupSummaries,
   normalizeSortPreferencesForSummaries,
+  normalizeFilterPreferences,
   normalizeTags,
   sortSummaries
 } from "./models.js";
@@ -23,6 +25,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     search: "",
     statusFilter: "all",
     tagFilter: "",
+    filterPreferences: DEFAULT_FILTER_PREFERENCES,
     sortPreferences: null,
     selectedKey: null,
     showCompleted: false,
@@ -50,10 +53,12 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     const envelope = await storage.load();
     state.records = envelope.records;
     state.allSummaries = envelope.openListCache.items || [];
+    state.filterPreferences = normalizeFilterPreferences(envelope.filterPreferences);
     state.sortPreferences = normalizeSortPreferencesForSummaries(envelope.sortPreferences, state.allSummaries);
     state.filteredSummaries = computeFiltered();
     unsubscribe = storage.subscribe((nextEnvelope) => {
       state.records = nextEnvelope.records;
+      state.filterPreferences = normalizeFilterPreferences(nextEnvelope.filterPreferences);
       state.sortPreferences = normalizeSortPreferencesForSummaries(nextEnvelope.sortPreferences, state.allSummaries);
       state.filteredSummaries = computeFiltered();
       render();
@@ -68,7 +73,8 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       search: state.search,
       statusFilter: state.statusFilter,
       tagFilter: state.tagFilter,
-      showCompleted: state.showCompleted
+      showCompleted: state.showCompleted,
+      filterPreferences: state.filterPreferences
     });
     return sortSummaries({
       summaries: filtered,
@@ -254,6 +260,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         await storage.save(latest);
         state.allSummaries = enriched;
         state.records = latest.records;
+        state.filterPreferences = normalizeFilterPreferences(latest.filterPreferences);
         state.sortPreferences = normalizeSortPreferencesForSummaries(latest.sortPreferences, enriched);
         if (state.selectedKey && !state.allSummaries.some((item) => item.key === state.selectedKey)) {
           state.selectedKey = null;
@@ -390,6 +397,35 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         state.showCompleted = !state.showCompleted;
         state.filteredSummaries = computeFiltered();
         render();
+      },
+      async onFilterChange(filterPreferences) {
+        const previous = state.filterPreferences;
+        state.filterPreferences = normalizeFilterPreferences({
+          ...state.filterPreferences,
+          ...filterPreferences
+        });
+        state.filteredSummaries = computeFiltered();
+        render();
+        try {
+          await storage.updateFilterPreferences(state.filterPreferences);
+        } catch (error) {
+          state.filterPreferences = previous;
+          state.warning = `Could not save filters. ${error.message}`;
+          render();
+        }
+      },
+      async onClearFilters() {
+        const previous = state.filterPreferences;
+        state.filterPreferences = normalizeFilterPreferences(DEFAULT_FILTER_PREFERENCES);
+        state.filteredSummaries = computeFiltered();
+        render();
+        try {
+          await storage.updateFilterPreferences(state.filterPreferences);
+        } catch (error) {
+          state.filterPreferences = previous;
+          state.warning = `Could not clear filters. ${error.message}`;
+          render();
+        }
       },
       async onSortChange(sortPreferences) {
         const previous = state.sortPreferences;

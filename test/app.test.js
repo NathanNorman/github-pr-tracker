@@ -32,6 +32,13 @@ function makeStorage(seed) {
       }
       return envelope;
     },
+    async updateFilterPreferences(filterPreferences) {
+      envelope.filterPreferences = structuredClone(filterPreferences);
+      for (const callback of subscribers) {
+        callback(structuredClone(envelope));
+      }
+      return envelope;
+    },
     async importEnvelope(raw) {
       if (raw.accountLogin && raw.accountLogin !== envelope.accountLogin) {
         throw new Error(`Import account ${raw.accountLogin} does not match signed-in account ${envelope.accountLogin}.`);
@@ -386,6 +393,85 @@ test("primary repository sorting renders separate sections and secondary updated
     "toasttab/toast-analytics#1"
   ]);
   assert.match(shadow.querySelector(".sort-summary").textContent, /Group: Repository/);
+});
+
+test("filter popover persists structured filters, filters before grouping, and clears them", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    filterPreferences: {
+      hideDrafts: false,
+      repository: "ACME/API",
+      review: "all",
+      checks: "all"
+    },
+    sortPreferences: {
+      primary: { field: "repository", direction: "asc" },
+      secondary: { field: "updated", direction: "desc" }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Draft API", url: "https://github.toasttab.com/acme/api/pull/1", draft: true, review: "approved", checks: "passing", updatedAt: 10 },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Ready API", url: "https://github.toasttab.com/acme/api/pull/2", draft: false, review: "approved", checks: "passing", updatedAt: 20 },
+        { key: "acme/web#3", owner: "acme", repo: "web", number: 3, title: "Ready Web", url: "https://github.toasttab.com/acme/web/pull/3", draft: false, review: "required", checks: "failing", updatedAt: 30 }
+      ]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const filterSummary = shadow.querySelector(".filter-summary");
+  const hideDrafts = shadow.querySelector('[data-focus-id="filter-hide-drafts"]');
+  const repository = shadow.querySelector('[data-focus-id="filter-repository"]');
+  const review = shadow.querySelector('[data-focus-id="filter-review"]');
+  const checks = shadow.querySelector('[data-focus-id="filter-checks"]');
+
+  assert.equal(filterSummary.textContent, "Filter · 1");
+  assert.deepEqual([...repository.options].map((option) => option.value), ["all", "acme/api", "acme/web"]);
+  assert.equal(repository.value, "acme/api");
+
+  hideDrafts.checked = true;
+  hideDrafts.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  repository.value = "acme/api";
+  repository.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  review.value = "approved";
+  review.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  checks.value = "passing";
+  checks.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(storage.getEnvelope().filterPreferences, {
+    hideDrafts: true,
+    repository: "acme/api",
+    review: "approved",
+    checks: "passing"
+  });
+  assert.equal(filterSummary.textContent, "Filter · 4");
+  assert.deepEqual(app.getState().filteredSummaries.map((summary) => summary.key), ["acme/api#2"]);
+  assert.deepEqual([...shadow.querySelectorAll(".pr-group-title")].map((node) => node.textContent), ["api"]);
+
+  shadow.querySelector(".clear-filters").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(storage.getEnvelope().filterPreferences, {
+    hideDrafts: false,
+    repository: "all",
+    review: "all",
+    checks: "all"
+  });
+  assert.equal(filterSummary.textContent, "Filter");
+  assert.deepEqual([...shadow.querySelectorAll(".pr-group-title")].map((node) => node.textContent), ["api", "web"]);
 });
 
 test("invalid nested buttons are avoided and row selection remains keyboard-accessible", async () => {

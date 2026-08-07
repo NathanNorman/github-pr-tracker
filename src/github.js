@@ -92,7 +92,7 @@ export function parsePullListDocument(doc, origin = GITHUB_ORIGIN) {
       continue;
     }
     const updatedAt = row?.querySelector("relative-time")?.getAttribute("datetime") || "";
-    const draft = Boolean(row?.textContent?.match(/\bDraft\b/i));
+    const draft = parseListDraftState(row, titleAnchor);
     const listDetail = parsePullListDetail(row);
     items.push({
       key: parsed.key,
@@ -112,6 +112,28 @@ export function parsePullListDocument(doc, origin = GITHUB_ORIGIN) {
     null;
   const nextUrl = nextHref ? new URL(nextHref, origin).href : null;
   return { items, nextHref: nextUrl && isSameOriginGitHubUrl(nextUrl) ? nextUrl : null };
+}
+
+function parseListDraftState(row, titleAnchor) {
+  if (!row) {
+    return false;
+  }
+  if (row.querySelector('[data-state="draft" i], [data-draft="true" i], .State--draft')) {
+    return true;
+  }
+  const semanticDraft = [...row.querySelectorAll('[aria-label], [title]')].some((node) => {
+    const label = [node.getAttribute("aria-label"), node.getAttribute("title")].filter(Boolean).join(" ");
+    return node !== titleAnchor && /^\s*(?:open )?draft(?: pull request)?\s*$/i.test(label);
+  });
+  if (semanticDraft) {
+    return true;
+  }
+  return [...row.querySelectorAll("span, strong, small")].some((node) =>
+    node !== titleAnchor &&
+    !node.closest("a") &&
+    node.children.length === 0 &&
+    /^\s*draft\s*$/i.test(node.textContent || "")
+  );
 }
 
 export async function fetchHtml(fetchImpl, url) {

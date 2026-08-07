@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.4.0
+// @version      1.5.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.4.0
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.5.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -366,6 +366,12 @@
       direction: SORT_DIRECTIONS.asc
     }
   });
+  var DEFAULT_FILTER_PREFERENCES = Object.freeze({
+    hideDrafts: false,
+    repository: "all",
+    review: "all",
+    checks: "all"
+  });
   var SORT_FIELD_SET = new Set(Object.values(SORT_FIELDS));
   var SORT_DIRECTION_SET = new Set(Object.values(SORT_DIRECTIONS));
   var PERSONAL_STATUS_ORDER = new Map(PERSONAL_STATUSES.map((status, index) => [status, index]));
@@ -454,7 +460,8 @@
       records,
       openListCache: normalizeOpenListCache(rawEnvelope?.openListCache),
       detailCache: normalizeDetailCache(rawEnvelope?.detailCache),
-      sortPreferences: normalizeSortPreferences(rawEnvelope?.sortPreferences)
+      sortPreferences: normalizeSortPreferences(rawEnvelope?.sortPreferences),
+      filterPreferences: normalizeFilterPreferences(rawEnvelope?.filterPreferences)
     };
   }
   function normalizeOpenListCache(rawCache) {
@@ -501,6 +508,15 @@
     return {
       primary,
       secondary
+    };
+  }
+  function normalizeFilterPreferences(rawPreferences) {
+    const repository = typeof rawPreferences?.repository === "string" ? rawPreferences.repository.trim() : "";
+    return {
+      hideDrafts: rawPreferences?.hideDrafts === true,
+      repository: repository && repository.toLocaleLowerCase() !== "all" ? repository : DEFAULT_FILTER_PREFERENCES.repository,
+      review: REVIEW_STATES.includes(rawPreferences?.review) ? rawPreferences.review : DEFAULT_FILTER_PREFERENCES.review,
+      checks: CHECK_STATES.includes(rawPreferences?.checks) ? rawPreferences.checks : DEFAULT_FILTER_PREFERENCES.checks
     };
   }
   function getAvailableSortOptions(summaries) {
@@ -592,8 +608,17 @@
     }
     return true;
   }
-  function filterSummaries({ summaries, records, search, statusFilter, tagFilter, showCompleted }) {
+  function filterSummaries({
+    summaries,
+    records,
+    search,
+    statusFilter,
+    tagFilter,
+    showCompleted,
+    filterPreferences
+  }) {
     const normalizedSearch = (search || "").trim().toLocaleLowerCase();
+    const normalizedFilters = normalizeFilterPreferences(filterPreferences);
     return summaries.filter((summary) => {
       const record = records[summary.key] || DEFAULT_RECORD;
       if (!showCompleted && record.status === "done") {
@@ -603,6 +628,18 @@
         return false;
       }
       if (tagFilter && !record.tags.some((tag) => tag.name.toLocaleLowerCase() === tagFilter.toLocaleLowerCase())) {
+        return false;
+      }
+      if (normalizedFilters.hideDrafts && summary.draft === true) {
+        return false;
+      }
+      if (normalizedFilters.repository !== "all" && repositoryName(summary).toLocaleLowerCase() !== normalizedFilters.repository.toLocaleLowerCase()) {
+        return false;
+      }
+      if (normalizedFilters.review !== "all" && (summary.review || "unknown") !== normalizedFilters.review) {
+        return false;
+      }
+      if (normalizedFilters.checks !== "all" && (summary.checks || "unknown") !== normalizedFilters.checks) {
         return false;
       }
       if (!normalizedSearch) {
@@ -871,7 +908,7 @@
         continue;
       }
       const updatedAt = row?.querySelector("relative-time")?.getAttribute("datetime") || "";
-      const draft = Boolean(row?.textContent?.match(/\bDraft\b/i));
+      const draft = parseListDraftState(row, titleAnchor);
       const listDetail = parsePullListDetail(row);
       items.push({
         key: parsed.key,
@@ -888,6 +925,24 @@
     const nextHref = doc.querySelector('a[rel="next"]')?.getAttribute("href") || [...doc.querySelectorAll("a")].find((anchor) => /^next$/i.test(anchor.textContent.trim()))?.getAttribute("href") || null;
     const nextUrl = nextHref ? new URL(nextHref, origin).href : null;
     return { items, nextHref: nextUrl && isSameOriginGitHubUrl(nextUrl) ? nextUrl : null };
+  }
+  function parseListDraftState(row, titleAnchor) {
+    if (!row) {
+      return false;
+    }
+    if (row.querySelector('[data-state="draft" i], [data-draft="true" i], .State--draft')) {
+      return true;
+    }
+    const semanticDraft = [...row.querySelectorAll("[aria-label], [title]")].some((node) => {
+      const label = [node.getAttribute("aria-label"), node.getAttribute("title")].filter(Boolean).join(" ");
+      return node !== titleAnchor && /^\s*(?:open )?draft(?: pull request)?\s*$/i.test(label);
+    });
+    if (semanticDraft) {
+      return true;
+    }
+    return [...row.querySelectorAll("span, strong, small")].some(
+      (node) => node !== titleAnchor && !node.closest("a") && node.children.length === 0 && /^\s*draft\s*$/i.test(node.textContent || "")
+    );
   }
   async function fetchHtml(fetchImpl, url) {
     const response = await fetchImpl(url, {
@@ -1210,10 +1265,12 @@ select {
   align-items: center;
   gap: 8px;
 }
-.sort-menu {
+.sort-menu,
+.structured-filter-menu {
   position: relative;
 }
-.sort-summary {
+.sort-summary,
+.filter-summary {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
@@ -1227,20 +1284,25 @@ select {
   list-style: none;
   user-select: none;
 }
-.sort-summary::-webkit-details-marker {
+.sort-summary::-webkit-details-marker,
+.filter-summary::-webkit-details-marker {
   display: none;
 }
-.sort-summary::after {
+.sort-summary::after,
+.filter-summary::after {
   content: "\u25BE";
   margin-left: 8px;
   color: var(--fgColor-muted, #59636e);
   font-size: 11px;
 }
 .sort-menu[open] .sort-summary,
-.sort-summary:hover {
+.structured-filter-menu[open] .filter-summary,
+.sort-summary:hover,
+.filter-summary:hover {
   background: var(--button-default-bgColor-hover, var(--bgColor-neutral-muted, #eaeef2));
 }
-.sort-rows {
+.sort-rows,
+.filter-popover {
   position: absolute;
   z-index: 20;
   top: calc(100% + 8px);
@@ -1253,6 +1315,61 @@ select {
   border-radius: 10px;
   background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
   box-shadow: var(--shadow-floating-large, 0 12px 28px rgba(31,35,40,0.15));
+}
+.filter-popover {
+  min-width: 280px;
+}
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+  font-weight: 500;
+}
+.filter-checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--fgColor-accent, #0969da);
+}
+.structured-filter-row {
+  display: grid;
+  gap: 4px;
+}
+.filter-row-label {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  font-weight: 600;
+}
+.structured-filter-row select {
+  width: 100%;
+  height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 6px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+}
+.clear-filters {
+  justify-self: start;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fgColor-accent, #0969da);
+  font-size: 12px;
+  font-weight: 500;
+}
+.clear-filters:hover:not(:disabled) {
+  background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.16));
+}
+.clear-filters:disabled {
+  color: var(--fgColor-muted, #59636e);
+  cursor: default;
+  opacity: 0.65;
 }
 .sort-row {
   display: grid;
@@ -1725,6 +1842,9 @@ select {
   .sort-rows {
     min-width: min(320px, calc(100vw - 48px));
   }
+  .filter-popover {
+    min-width: min(280px, calc(100vw - 48px));
+  }
 }
 @media (max-width: 620px) {
   .panel-header,
@@ -1755,6 +1875,20 @@ select {
     waiting: "Waiting",
     blocked: "Blocked",
     done: "Done"
+  };
+  var REVIEW_FILTER_LABELS = {
+    approved: "Approved",
+    changes_requested: "Changes requested",
+    required: "Review required",
+    none: "No review required",
+    unknown: "Review unavailable"
+  };
+  var CHECK_FILTER_LABELS = {
+    passing: "Passing",
+    failing: "Failing",
+    pending: "Pending",
+    none: "No checks",
+    unknown: "Checks unavailable"
   };
   function createUi(container, handlers) {
     const doc = container.ownerDocument;
@@ -1821,6 +1955,30 @@ select {
     resultCount.className = "result-count";
     const panelActions = doc.createElement("div");
     panelActions.className = "panel-actions";
+    const filterMenu = doc.createElement("details");
+    filterMenu.className = "structured-filter-menu";
+    const filterSummary = doc.createElement("summary");
+    filterSummary.className = "filter-summary";
+    filterSummary.textContent = "Filter";
+    const filterPopover = doc.createElement("div");
+    filterPopover.className = "filter-popover";
+    const hideDraftsLabel = doc.createElement("label");
+    hideDraftsLabel.className = "filter-checkbox";
+    const hideDraftsCheckbox = doc.createElement("input");
+    hideDraftsCheckbox.type = "checkbox";
+    hideDraftsCheckbox.setAttribute("data-focus-id", "filter-hide-drafts");
+    const hideDraftsText = doc.createElement("span");
+    hideDraftsText.textContent = "Hide draft PRs";
+    hideDraftsLabel.append(hideDraftsCheckbox, hideDraftsText);
+    const repositorySelect = makeSelect("filter-repository", "Repository filter");
+    const reviewSelect = makeSelect("filter-review", "Review state filter");
+    const checksSelect = makeSelect("filter-checks", "Checks state filter");
+    const repositoryRow = makeFilterRow("Repository", repositorySelect);
+    const reviewRow = makeFilterRow("Review state", reviewSelect);
+    const checksRow = makeFilterRow("Checks state", checksSelect);
+    const clearFiltersButton = makeActionButton("Clear filters", () => handlers.onClearFilters(), "clear-filters");
+    filterPopover.append(hideDraftsLabel, repositoryRow, reviewRow, checksRow, clearFiltersButton);
+    filterMenu.append(filterSummary, filterPopover);
     const sortMenu = doc.createElement("details");
     sortMenu.className = "sort-menu";
     const sortSummary = doc.createElement("summary");
@@ -1837,7 +1995,7 @@ select {
     sortRows.append(sortByRow, thenByRow);
     sortMenu.append(sortSummary, sortRows);
     const refreshButton = makeActionButton("Refresh", () => handlers.onRefresh(), "action-btn");
-    panelActions.append(sortMenu, refreshButton);
+    panelActions.append(filterMenu, sortMenu, refreshButton);
     panelHeader.append(resultCount, panelActions);
     const warning = doc.createElement("div");
     warning.className = "warning";
@@ -1880,6 +2038,7 @@ select {
       showCompleted.setAttribute("aria-pressed", String(state.showCompleted));
       refreshButton.textContent = state.refreshing ? "Refreshing\u2026" : "Refresh";
       refreshButton.disabled = state.refreshing;
+      renderFilterControls(state);
       renderSortControls(state);
       const counts = countStatuses(state);
       const options = ["all", ...PERSONAL_STATUSES];
@@ -1909,6 +2068,28 @@ select {
       for (const stale of existing.values()) {
         stale.remove();
       }
+    }
+    function renderFilterControls(state) {
+      const preferences = state.filterPreferences;
+      const repositoryOptions = repositoryFilterOptions(state.allSummaries, preferences.repository);
+      syncSelectOptions(repositorySelect, repositoryOptions);
+      syncSelectOptions(reviewSelect, [
+        { value: "all", label: "All review states" },
+        ...REVIEW_STATES.map((value) => ({ value, label: REVIEW_FILTER_LABELS[value] }))
+      ]);
+      syncSelectOptions(checksSelect, [
+        { value: "all", label: "All checks states" },
+        ...CHECK_STATES.map((value) => ({ value, label: CHECK_FILTER_LABELS[value] }))
+      ]);
+      hideDraftsCheckbox.checked = preferences.hideDrafts;
+      repositorySelect.value = repositoryOptions.find(
+        (option) => option.value.toLocaleLowerCase() === preferences.repository.toLocaleLowerCase()
+      )?.value || preferences.repository;
+      reviewSelect.value = preferences.review;
+      checksSelect.value = preferences.checks;
+      const activeCount = countStructuredFilters(preferences);
+      filterSummary.textContent = activeCount ? `Filter \xB7 ${activeCount}` : "Filter";
+      clearFiltersButton.disabled = activeCount === 0;
     }
     function renderSortControls(state) {
       syncSelectOptions(primaryFieldSelect, state.groupOptions);
@@ -1947,7 +2128,7 @@ select {
           emptyText.textContent = "Refresh to check GitHub again.";
         } else {
           emptyTitle.textContent = "Nothing matches this view";
-          emptyText.textContent = "Try another status or clear your search.";
+          emptyText.textContent = "Try another status, clear filters, or clear your search.";
         }
         empty.append(emptyTitle, emptyText);
         list.append(empty);
@@ -2212,6 +2393,15 @@ select {
       row.append(label, fieldSelect, directionSelect);
       return row;
     }
+    function makeFilterRow(labelText, select) {
+      const row = doc.createElement("label");
+      row.className = "structured-filter-row";
+      const label = doc.createElement("span");
+      label.className = "filter-row-label";
+      label.textContent = labelText;
+      row.append(label, select);
+      return row;
+    }
     function makeField(labelText) {
       const field = doc.createElement("label");
       field.className = "field";
@@ -2419,6 +2609,18 @@ select {
       emitSortChange();
     });
     secondaryDirectionSelect.addEventListener("change", emitSortChange);
+    hideDraftsCheckbox.addEventListener("change", () => {
+      void handlers.onFilterChange({ hideDrafts: hideDraftsCheckbox.checked });
+    });
+    repositorySelect.addEventListener("change", () => {
+      void handlers.onFilterChange({ repository: repositorySelect.value });
+    });
+    reviewSelect.addEventListener("change", () => {
+      void handlers.onFilterChange({ review: reviewSelect.value });
+    });
+    checksSelect.addEventListener("change", () => {
+      void handlers.onFilterChange({ checks: checksSelect.value });
+    });
     return { render, shadow, flushPending, setSaveState };
   }
   function countStatuses(state) {
@@ -2429,6 +2631,25 @@ select {
     }
     counts.active = state.allSummaries.length - counts.done;
     return counts;
+  }
+  function repositoryFilterOptions(summaries, selectedValue) {
+    const repositories = /* @__PURE__ */ new Map();
+    for (const summary of summaries) {
+      const value = [summary.owner, summary.repo].filter(Boolean).join("/");
+      if (value && !repositories.has(value.toLocaleLowerCase())) {
+        repositories.set(value.toLocaleLowerCase(), { value, label: value });
+      }
+    }
+    const options = [...repositories.values()].sort(
+      (left, right) => left.label.localeCompare(right.label, void 0, { sensitivity: "base", numeric: true })
+    );
+    if (selectedValue !== "all" && !options.some((option) => option.value.toLocaleLowerCase() === selectedValue.toLocaleLowerCase())) {
+      options.push({ value: selectedValue, label: `${selectedValue} (not in current list)` });
+    }
+    return [{ value: "all", label: "All repositories" }, ...options];
+  }
+  function countStructuredFilters(preferences) {
+    return Number(preferences.hideDrafts) + Number(preferences.repository !== "all") + Number(preferences.review !== "all") + Number(preferences.checks !== "all");
   }
   function formatCount(count) {
     return `${count} pull request${count === 1 ? "" : "s"}`;
@@ -2480,6 +2701,7 @@ select {
       search: "",
       statusFilter: "all",
       tagFilter: "",
+      filterPreferences: DEFAULT_FILTER_PREFERENCES,
       sortPreferences: null,
       selectedKey: null,
       showCompleted: false,
@@ -2505,10 +2727,12 @@ select {
       const envelope = await storage.load();
       state.records = envelope.records;
       state.allSummaries = envelope.openListCache.items || [];
+      state.filterPreferences = normalizeFilterPreferences(envelope.filterPreferences);
       state.sortPreferences = normalizeSortPreferencesForSummaries(envelope.sortPreferences, state.allSummaries);
       state.filteredSummaries = computeFiltered();
       unsubscribe = storage.subscribe((nextEnvelope) => {
         state.records = nextEnvelope.records;
+        state.filterPreferences = normalizeFilterPreferences(nextEnvelope.filterPreferences);
         state.sortPreferences = normalizeSortPreferencesForSummaries(nextEnvelope.sortPreferences, state.allSummaries);
         state.filteredSummaries = computeFiltered();
         render();
@@ -2522,7 +2746,8 @@ select {
         search: state.search,
         statusFilter: state.statusFilter,
         tagFilter: state.tagFilter,
-        showCompleted: state.showCompleted
+        showCompleted: state.showCompleted,
+        filterPreferences: state.filterPreferences
       });
       return sortSummaries({
         summaries: filtered,
@@ -2676,6 +2901,7 @@ select {
           await storage.save(latest);
           state.allSummaries = enriched;
           state.records = latest.records;
+          state.filterPreferences = normalizeFilterPreferences(latest.filterPreferences);
           state.sortPreferences = normalizeSortPreferencesForSummaries(latest.sortPreferences, enriched);
           if (state.selectedKey && !state.allSummaries.some((item) => item.key === state.selectedKey)) {
             state.selectedKey = null;
@@ -2800,6 +3026,35 @@ select {
           state.showCompleted = !state.showCompleted;
           state.filteredSummaries = computeFiltered();
           render();
+        },
+        async onFilterChange(filterPreferences) {
+          const previous = state.filterPreferences;
+          state.filterPreferences = normalizeFilterPreferences({
+            ...state.filterPreferences,
+            ...filterPreferences
+          });
+          state.filteredSummaries = computeFiltered();
+          render();
+          try {
+            await storage.updateFilterPreferences(state.filterPreferences);
+          } catch (error) {
+            state.filterPreferences = previous;
+            state.warning = `Could not save filters. ${error.message}`;
+            render();
+          }
+        },
+        async onClearFilters() {
+          const previous = state.filterPreferences;
+          state.filterPreferences = normalizeFilterPreferences(DEFAULT_FILTER_PREFERENCES);
+          state.filteredSummaries = computeFiltered();
+          render();
+          try {
+            await storage.updateFilterPreferences(state.filterPreferences);
+          } catch (error) {
+            state.filterPreferences = previous;
+            state.warning = `Could not clear filters. ${error.message}`;
+            render();
+          }
         },
         async onSortChange(sortPreferences) {
           const previous = state.sortPreferences;
@@ -2962,6 +3217,18 @@ select {
       }
       return envelope;
     }
+    async function updateFilterPreferences(filterPreferences) {
+      const envelope = await load();
+      envelope.filterPreferences = normalizeFilterPreferences({
+        ...envelope.filterPreferences,
+        ...filterPreferences
+      });
+      await save(envelope);
+      for (const listener of listeners) {
+        listener(envelope);
+      }
+      return envelope;
+    }
     async function importEnvelope(rawEnvelope) {
       validateImportEnvelope(rawEnvelope);
       if (rawEnvelope.accountLogin !== login) {
@@ -2983,6 +3250,7 @@ select {
       subscribe,
       upsertRecord,
       updateSortPreferences,
+      updateFilterPreferences,
       importEnvelope
     };
   }

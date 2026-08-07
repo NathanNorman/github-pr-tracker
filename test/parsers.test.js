@@ -44,6 +44,16 @@ test("parsePullListDocument reads Toast Enterprise review and check signals", ()
   );
 });
 
+test("parsePullListDocument does not infer draft state from the PR title", () => {
+  const doc = parseHtml(`
+    <div data-issue-and-pr-hovercards-enabled="true">
+      <a data-hovercard-type="pull_request" href="/acme/api/pull/14">Draft documentation for the API</a>
+      <a class="label"><span>Draft</span></a>
+    </div>
+  `);
+  assert.equal(parsePullListDocument(doc).items[0].draft, false);
+});
+
 test("fetchOpenPrs follows unique same-origin pagination links", async () => {
   const pages = new Map([
     ["https://github.toasttab.com/pulls?q=is%3Aopen+is%3Apr+archived%3Afalse+author%3A%40me", await fixture("pulls-page1.html")],

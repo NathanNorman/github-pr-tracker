@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createStorage } from "../src/storage.js";
 import {
+  DEFAULT_FILTER_PREFERENCES,
   DEFAULT_SORT_PREFERENCES,
   SORT_FIELDS,
   filterSummaries,
   groupSummaries,
   normalizeEnvelope,
+  normalizeFilterPreferences,
   normalizeSortPreferencesForSummaries,
   normalizeTags,
   sortSummaries
@@ -48,6 +50,28 @@ test("normalizeEnvelope namespaces records for account", () => {
   assert.equal(envelope.records["acme/api#1"].status, "next_up");
   assert.equal(envelope.detailCache["acme/api#1"].parserVersion, 2);
   assert.deepEqual(envelope.sortPreferences, DEFAULT_SORT_PREFERENCES);
+  assert.deepEqual(envelope.filterPreferences, DEFAULT_FILTER_PREFERENCES);
+});
+
+test("normalizeFilterPreferences defaults missing and invalid stored values safely", () => {
+  assert.deepEqual(normalizeFilterPreferences(null), DEFAULT_FILTER_PREFERENCES);
+  assert.deepEqual(normalizeFilterPreferences({
+    hideDrafts: "yes",
+    repository: "   ",
+    review: "stale",
+    checks: 7
+  }), DEFAULT_FILTER_PREFERENCES);
+  assert.deepEqual(normalizeFilterPreferences({
+    hideDrafts: true,
+    repository: " acme/api ",
+    review: "changes_requested",
+    checks: "pending"
+  }), {
+    hideDrafts: true,
+    repository: "acme/api",
+    review: "changes_requested",
+    checks: "pending"
+  });
 });
 
 test("import merges newest modifiedAt without deleting unmatched records", async () => {
@@ -97,6 +121,74 @@ test("filterSummaries hides done by default and supports recovery", () => {
   };
   assert.equal(filterSummaries({ summaries, records, search: "", statusFilter: "all", tagFilter: "", showCompleted: false }).length, 1);
   assert.equal(filterSummaries({ summaries, records, search: "", statusFilter: "all", tagFilter: "", showCompleted: true }).length, 2);
+});
+
+test("filterSummaries composes structured filters with the existing view filters", () => {
+  const summaries = [
+    { key: "acme/api#1", owner: "acme", repo: "api", title: "Target draft", number: 1, draft: true, review: "approved", checks: "passing" },
+    { key: "acme/api#2", owner: "acme", repo: "api", title: "Target ready", number: 2, draft: false, review: "approved", checks: "passing" },
+    { key: "acme/api#3", owner: "acme", repo: "api", title: "Target unknown draft state", number: 3, review: "approved", checks: "passing" },
+    { key: "acme/web#4", owner: "acme", repo: "web", title: "Target other repo", number: 4, draft: false, review: "required", checks: "passing" },
+    { key: "acme/api#5", owner: "acme", repo: "api", title: "Unrelated", number: 5, draft: false, review: "approved", checks: "passing" },
+    { key: "acme/api#6", owner: "acme", repo: "api", title: "Target done", number: 6, draft: false, review: "approved", checks: "passing" }
+  ];
+  const makeRecord = (status = "blocked") => ({
+    status,
+    blockedBy: "CI",
+    notes: "target context",
+    tags: [{ name: "urgent", color: "red" }],
+    modifiedAt: 1
+  });
+  const records = Object.fromEntries(summaries.map((summary) => [summary.key, makeRecord()]));
+  records["acme/api#5"] = { ...makeRecord(), notes: "other context" };
+  records["acme/api#6"] = makeRecord("done");
+
+  const filtered = filterSummaries({
+    summaries,
+    records,
+    search: "target",
+    statusFilter: "blocked",
+    tagFilter: "URGENT",
+    showCompleted: false,
+    filterPreferences: {
+      hideDrafts: true,
+      repository: "ACME/API",
+      review: "approved",
+      checks: "passing"
+    }
+  });
+
+  assert.deepEqual(filtered.map((summary) => summary.key), ["acme/api#2", "acme/api#3"]);
+});
+
+test("filterSummaries treats missing native states as unknown", () => {
+  const summaries = [{ key: "acme/api#1", owner: "acme", repo: "api", title: "One", number: 1 }];
+  assert.equal(filterSummaries({
+    summaries,
+    records: {},
+    search: "",
+    statusFilter: "all",
+    tagFilter: "",
+    showCompleted: true,
+    filterPreferences: { review: "unknown", checks: "unknown" }
+  }).length, 1);
+});
+
+test("updateFilterPreferences persists normalized preferences", async () => {
+  const { gm, read } = makeGm({ accountLogin: "octocat", records: {}, filterPreferences: null });
+  const storage = createStorage(gm, "octocat");
+  await storage.updateFilterPreferences({
+    hideDrafts: true,
+    repository: " acme/api ",
+    review: "approved",
+    checks: "broken"
+  });
+  assert.deepEqual(read().filterPreferences, {
+    hideDrafts: true,
+    repository: "acme/api",
+    review: "approved",
+    checks: "all"
+  });
 });
 
 test("updateSortPreferences persists normalized preferences", async () => {

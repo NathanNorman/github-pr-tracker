@@ -1,4 +1,12 @@
-import { DEFAULT_RECORD, PERSONAL_STATUSES, SAVE_DEBOUNCE_MS, TAG_COLOR_TOKENS, TAG_COLORS } from "./constants.js";
+import {
+  CHECK_STATES,
+  DEFAULT_RECORD,
+  PERSONAL_STATUSES,
+  REVIEW_STATES,
+  SAVE_DEBOUNCE_MS,
+  TAG_COLOR_TOKENS,
+  TAG_COLORS
+} from "./constants.js";
 import { debounce, now } from "./utils.js";
 
 const STATUS_LABELS = {
@@ -7,6 +15,22 @@ const STATUS_LABELS = {
   waiting: "Waiting",
   blocked: "Blocked",
   done: "Done"
+};
+
+const REVIEW_FILTER_LABELS = {
+  approved: "Approved",
+  changes_requested: "Changes requested",
+  required: "Review required",
+  none: "No review required",
+  unknown: "Review unavailable"
+};
+
+const CHECK_FILTER_LABELS = {
+  passing: "Passing",
+  failing: "Failing",
+  pending: "Pending",
+  none: "No checks",
+  unknown: "Checks unavailable"
 };
 
 export function createUi(container, handlers) {
@@ -79,6 +103,30 @@ export function createUi(container, handlers) {
   resultCount.className = "result-count";
   const panelActions = doc.createElement("div");
   panelActions.className = "panel-actions";
+  const filterMenu = doc.createElement("details");
+  filterMenu.className = "structured-filter-menu";
+  const filterSummary = doc.createElement("summary");
+  filterSummary.className = "filter-summary";
+  filterSummary.textContent = "Filter";
+  const filterPopover = doc.createElement("div");
+  filterPopover.className = "filter-popover";
+  const hideDraftsLabel = doc.createElement("label");
+  hideDraftsLabel.className = "filter-checkbox";
+  const hideDraftsCheckbox = doc.createElement("input");
+  hideDraftsCheckbox.type = "checkbox";
+  hideDraftsCheckbox.setAttribute("data-focus-id", "filter-hide-drafts");
+  const hideDraftsText = doc.createElement("span");
+  hideDraftsText.textContent = "Hide draft PRs";
+  hideDraftsLabel.append(hideDraftsCheckbox, hideDraftsText);
+  const repositorySelect = makeSelect("filter-repository", "Repository filter");
+  const reviewSelect = makeSelect("filter-review", "Review state filter");
+  const checksSelect = makeSelect("filter-checks", "Checks state filter");
+  const repositoryRow = makeFilterRow("Repository", repositorySelect);
+  const reviewRow = makeFilterRow("Review state", reviewSelect);
+  const checksRow = makeFilterRow("Checks state", checksSelect);
+  const clearFiltersButton = makeActionButton("Clear filters", () => handlers.onClearFilters(), "clear-filters");
+  filterPopover.append(hideDraftsLabel, repositoryRow, reviewRow, checksRow, clearFiltersButton);
+  filterMenu.append(filterSummary, filterPopover);
   const sortMenu = doc.createElement("details");
   sortMenu.className = "sort-menu";
   const sortSummary = doc.createElement("summary");
@@ -95,7 +143,7 @@ export function createUi(container, handlers) {
   sortRows.append(sortByRow, thenByRow);
   sortMenu.append(sortSummary, sortRows);
   const refreshButton = makeActionButton("Refresh", () => handlers.onRefresh(), "action-btn");
-  panelActions.append(sortMenu, refreshButton);
+  panelActions.append(filterMenu, sortMenu, refreshButton);
   panelHeader.append(resultCount, panelActions);
 
   const warning = doc.createElement("div");
@@ -148,6 +196,7 @@ export function createUi(container, handlers) {
     showCompleted.setAttribute("aria-pressed", String(state.showCompleted));
     refreshButton.textContent = state.refreshing ? "Refreshing…" : "Refresh";
     refreshButton.disabled = state.refreshing;
+    renderFilterControls(state);
     renderSortControls(state);
 
     const counts = countStatuses(state);
@@ -180,6 +229,30 @@ export function createUi(container, handlers) {
     for (const stale of existing.values()) {
       stale.remove();
     }
+  }
+
+  function renderFilterControls(state) {
+    const preferences = state.filterPreferences;
+    const repositoryOptions = repositoryFilterOptions(state.allSummaries, preferences.repository);
+    syncSelectOptions(repositorySelect, repositoryOptions);
+    syncSelectOptions(reviewSelect, [
+      { value: "all", label: "All review states" },
+      ...REVIEW_STATES.map((value) => ({ value, label: REVIEW_FILTER_LABELS[value] }))
+    ]);
+    syncSelectOptions(checksSelect, [
+      { value: "all", label: "All checks states" },
+      ...CHECK_STATES.map((value) => ({ value, label: CHECK_FILTER_LABELS[value] }))
+    ]);
+
+    hideDraftsCheckbox.checked = preferences.hideDrafts;
+    repositorySelect.value = repositoryOptions.find(
+      (option) => option.value.toLocaleLowerCase() === preferences.repository.toLocaleLowerCase()
+    )?.value || preferences.repository;
+    reviewSelect.value = preferences.review;
+    checksSelect.value = preferences.checks;
+    const activeCount = countStructuredFilters(preferences);
+    filterSummary.textContent = activeCount ? `Filter · ${activeCount}` : "Filter";
+    clearFiltersButton.disabled = activeCount === 0;
   }
 
   function renderSortControls(state) {
@@ -223,7 +296,7 @@ export function createUi(container, handlers) {
         emptyText.textContent = "Refresh to check GitHub again.";
       } else {
         emptyTitle.textContent = "Nothing matches this view";
-        emptyText.textContent = "Try another status or clear your search.";
+        emptyText.textContent = "Try another status, clear filters, or clear your search.";
       }
       empty.append(emptyTitle, emptyText);
       list.append(empty);
@@ -516,6 +589,16 @@ export function createUi(container, handlers) {
     return row;
   }
 
+  function makeFilterRow(labelText, select) {
+    const row = doc.createElement("label");
+    row.className = "structured-filter-row";
+    const label = doc.createElement("span");
+    label.className = "filter-row-label";
+    label.textContent = labelText;
+    row.append(label, select);
+    return row;
+  }
+
   function makeField(labelText) {
     const field = doc.createElement("label");
     field.className = "field";
@@ -744,6 +827,18 @@ export function createUi(container, handlers) {
     emitSortChange();
   });
   secondaryDirectionSelect.addEventListener("change", emitSortChange);
+  hideDraftsCheckbox.addEventListener("change", () => {
+    void handlers.onFilterChange({ hideDrafts: hideDraftsCheckbox.checked });
+  });
+  repositorySelect.addEventListener("change", () => {
+    void handlers.onFilterChange({ repository: repositorySelect.value });
+  });
+  reviewSelect.addEventListener("change", () => {
+    void handlers.onFilterChange({ review: reviewSelect.value });
+  });
+  checksSelect.addEventListener("change", () => {
+    void handlers.onFilterChange({ checks: checksSelect.value });
+  });
 
   return { render, shadow, flushPending, setSaveState };
 }
@@ -756,6 +851,33 @@ function countStatuses(state) {
   }
   counts.active = state.allSummaries.length - counts.done;
   return counts;
+}
+
+function repositoryFilterOptions(summaries, selectedValue) {
+  const repositories = new Map();
+  for (const summary of summaries) {
+    const value = [summary.owner, summary.repo].filter(Boolean).join("/");
+    if (value && !repositories.has(value.toLocaleLowerCase())) {
+      repositories.set(value.toLocaleLowerCase(), { value, label: value });
+    }
+  }
+  const options = [...repositories.values()].sort((left, right) =>
+    left.label.localeCompare(right.label, undefined, { sensitivity: "base", numeric: true })
+  );
+  if (
+    selectedValue !== "all" &&
+    !options.some((option) => option.value.toLocaleLowerCase() === selectedValue.toLocaleLowerCase())
+  ) {
+    options.push({ value: selectedValue, label: `${selectedValue} (not in current list)` });
+  }
+  return [{ value: "all", label: "All repositories" }, ...options];
+}
+
+function countStructuredFilters(preferences) {
+  return Number(preferences.hideDrafts) +
+    Number(preferences.repository !== "all") +
+    Number(preferences.review !== "all") +
+    Number(preferences.checks !== "all");
 }
 
 function formatCount(count) {

@@ -35,6 +35,13 @@ export const DEFAULT_SORT_PREFERENCES = Object.freeze({
   }
 });
 
+export const DEFAULT_FILTER_PREFERENCES = Object.freeze({
+  hideDrafts: false,
+  repository: "all",
+  review: "all",
+  checks: "all"
+});
+
 const SORT_FIELD_SET = new Set(Object.values(SORT_FIELDS));
 const SORT_DIRECTION_SET = new Set(Object.values(SORT_DIRECTIONS));
 const PERSONAL_STATUS_ORDER = new Map(PERSONAL_STATUSES.map((status, index) => [status, index]));
@@ -129,7 +136,8 @@ export function normalizeEnvelope(rawEnvelope, login) {
     records,
     openListCache: normalizeOpenListCache(rawEnvelope?.openListCache),
     detailCache: normalizeDetailCache(rawEnvelope?.detailCache),
-    sortPreferences: normalizeSortPreferences(rawEnvelope?.sortPreferences)
+    sortPreferences: normalizeSortPreferences(rawEnvelope?.sortPreferences),
+    filterPreferences: normalizeFilterPreferences(rawEnvelope?.filterPreferences)
   };
 }
 
@@ -180,6 +188,20 @@ export function normalizeSortPreferences(rawPreferences) {
   return {
     primary,
     secondary
+  };
+}
+
+export function normalizeFilterPreferences(rawPreferences) {
+  const repository = typeof rawPreferences?.repository === "string"
+    ? rawPreferences.repository.trim()
+    : "";
+  return {
+    hideDrafts: rawPreferences?.hideDrafts === true,
+    repository: repository && repository.toLocaleLowerCase() !== "all"
+      ? repository
+      : DEFAULT_FILTER_PREFERENCES.repository,
+    review: REVIEW_STATES.includes(rawPreferences?.review) ? rawPreferences.review : DEFAULT_FILTER_PREFERENCES.review,
+    checks: CHECK_STATES.includes(rawPreferences?.checks) ? rawPreferences.checks : DEFAULT_FILTER_PREFERENCES.checks
   };
 }
 
@@ -289,8 +311,17 @@ export function validateImportEnvelope(rawEnvelope) {
   return true;
 }
 
-export function filterSummaries({ summaries, records, search, statusFilter, tagFilter, showCompleted }) {
+export function filterSummaries({
+  summaries,
+  records,
+  search,
+  statusFilter,
+  tagFilter,
+  showCompleted,
+  filterPreferences
+}) {
   const normalizedSearch = (search || "").trim().toLocaleLowerCase();
+  const normalizedFilters = normalizeFilterPreferences(filterPreferences);
   return summaries.filter((summary) => {
     const record = records[summary.key] || DEFAULT_RECORD;
     if (!showCompleted && record.status === "done") {
@@ -300,6 +331,21 @@ export function filterSummaries({ summaries, records, search, statusFilter, tagF
       return false;
     }
     if (tagFilter && !record.tags.some((tag) => tag.name.toLocaleLowerCase() === tagFilter.toLocaleLowerCase())) {
+      return false;
+    }
+    if (normalizedFilters.hideDrafts && summary.draft === true) {
+      return false;
+    }
+    if (
+      normalizedFilters.repository !== "all" &&
+      repositoryName(summary).toLocaleLowerCase() !== normalizedFilters.repository.toLocaleLowerCase()
+    ) {
+      return false;
+    }
+    if (normalizedFilters.review !== "all" && (summary.review || "unknown") !== normalizedFilters.review) {
+      return false;
+    }
+    if (normalizedFilters.checks !== "all" && (summary.checks || "unknown") !== normalizedFilters.checks) {
       return false;
     }
     if (!normalizedSearch) {
