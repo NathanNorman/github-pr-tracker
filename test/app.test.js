@@ -662,6 +662,285 @@ test("each row surfaces its unresolved-thread count and a direct GitHub link", a
   assert.equal(shadow.querySelector(".thread-count").textContent, "3 unresolved threads");
 });
 
+test("eligible PR rows merge directly without selecting the row and prevent duplicate submissions", async () => {
+  const dom = makeDom();
+  let confirmResult = false;
+  let confirmationCount = 0;
+  let confirmationMessage = "";
+  dom.window.confirm = (message) => {
+    confirmationCount += 1;
+    confirmationMessage = message;
+    return confirmResult;
+  };
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: { "acme/api#1": { status: "next_up", blockedBy: "", notes: "keep", tags: [], modifiedAt: 1 } },
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+    },
+    detailCache: { "acme/api#1": { updatedAt: 1, parserVersion: DETAIL_PARSER_VERSION, detail: { merge: "clean" } } }
+  });
+  let actionPhase = false;
+  let releaseMergePage;
+  const mergePageGate = new Promise((resolve) => {
+    releaseMergePage = resolve;
+  });
+  const calls = [];
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url, options = {}) => {
+      if (!actionPhase) {
+        throw new Error("offline");
+      }
+      calls.push({ url: String(url), options });
+      if (options.method === "POST") {
+        return { ok: true, status: 200, text: async () => '<span class="State State--merged">Merged</span>' };
+      }
+      await mergePageGate;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => `
+          <form action="/acme/api/pull/1/merge" method="post">
+            <input type="hidden" name="authenticity_token" value="csrf">
+            <input type="hidden" name="head_sha" value="abc123">
+            <input name="commit_title" value="One (#1)">
+            <textarea name="commit_message">generated body</textarea>
+            <input type="hidden" name="do" value="squash">
+          </form>`
+      };
+    }
+  });
+  await app.init();
+  actionPhase = true;
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const row = shadow.querySelector('[data-pr-key="acme/api#1"]');
+  const rowMerge = row.querySelector(".row-merge-action");
+
+  assert.equal(rowMerge.tagName, "BUTTON");
+  assert.equal(rowMerge.type, "button");
+  assert.equal(rowMerge.classList.contains("merge-action"), true);
+  assert.match(rowMerge.textContent, /merge/i);
+  assert.match(rowMerge.getAttribute("aria-label"), /acme\/api #1.*empty commit message/i);
+  assert.equal(rowMerge.closest(".pr-row-select"), null);
+  assert.equal(app.getState().selectedKey, null);
+  assert.equal(shadow.querySelector(".drawer").hidden, true);
+
+  rowMerge.click();
+  assert.equal(confirmationCount, 1);
+  assert.match(confirmationMessage, /acme\/api#1/);
+  assert.match(confirmationMessage, /commit message body will be empty/i);
+  assert.equal(calls.length, 0);
+  assert.equal(app.getState().prAction.pending, false);
+
+  confirmResult = true;
+  rowMerge.click();
+  await waitFor(() => calls.length === 1, "row merge request");
+
+  const pendingMerge = shadow.querySelector('[data-pr-key="acme/api#1"] .row-merge-action');
+  assert.equal(app.getState().selectedKey, null);
+  assert.equal(shadow.querySelector(".drawer").hidden, true);
+  assert.equal(pendingMerge.textContent, "Merging…");
+  assert.equal(pendingMerge.disabled, true);
+  pendingMerge.click();
+  rowMerge.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(confirmationCount, 2);
+  assert.equal(calls.length, 1);
+
+  releaseMergePage();
+  await waitFor(() => app.getState().allSummaries.length === 0, "row merge completion");
+
+  assert.equal(calls.length, 2);
+  const submission = new URLSearchParams(calls[1].options.body);
+  assert.equal(submission.get("do"), "squash");
+  assert.equal(submission.get("commit_message"), "");
+  assert.equal(storage.getEnvelope().openListCache.items.length, 0);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
+  assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "keep");
+});
+
+test("a direct row merge preserves the open drawer for a different pull request", async () => {
+  const dom = makeDom();
+  dom.window.confirm = () => true;
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Ready", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Keep open", url: "https://github.toasttab.com/acme/api/pull/2", draft: false, merge: "blocked" }
+      ]
+    },
+    detailCache: {}
+  });
+  let actionPhase = false;
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url, options = {}) => {
+      if (!actionPhase) {
+        throw new Error("offline");
+      }
+      if (options.method === "POST") {
+        return { ok: true, status: 200, text: async () => '<span class="State State--merged">Merged</span>' };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => `
+          <form action="/acme/api/pull/1/merge" method="post">
+            <input type="hidden" name="authenticity_token" value="csrf">
+            <input type="hidden" name="head_sha" value="abc123">
+            <input name="commit_title" value="Ready (#1)">
+            <textarea name="commit_message"></textarea>
+            <input type="hidden" name="do" value="squash">
+          </form>`
+      };
+    }
+  });
+  await app.init();
+  actionPhase = true;
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector('[data-pr-key="acme/api#2"] .pr-row-select').click();
+  shadow.querySelector('[data-pr-key="acme/api#1"] .row-merge-action').click();
+  await waitFor(() => app.getState().allSummaries.length === 1, "direct row merge completion");
+
+  assert.equal(app.getState().selectedKey, "acme/api#2");
+  assert.equal(shadow.querySelector(".drawer").hidden, false);
+  assert.equal(shadow.querySelector(".drawer-identity .title").textContent, "Keep open");
+  assert.equal(shadow.querySelector('[data-pr-key="acme/api#1"]'), null);
+});
+
+test("row merge actions are hidden for blocked and draft pull requests", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Ready", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Blocked", url: "https://github.toasttab.com/acme/api/pull/2", draft: false, merge: "blocked" },
+        { key: "acme/api#3", owner: "acme", repo: "api", number: 3, title: "Draft", url: "https://github.toasttab.com/acme/api/pull/3", draft: true, merge: "clean" },
+        { key: "acme/api#4", owner: "acme", repo: "api", number: 4, title: "Conflicting", url: "https://github.toasttab.com/acme/api/pull/4", draft: false, merge: "conflicting" },
+        { key: "acme/api#5", owner: "acme", repo: "api", number: 5, title: "Unknown", url: "https://github.toasttab.com/acme/api/pull/5", draft: false, merge: "unknown" }
+      ]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({ dom, storage, fetchImpl: async () => { throw new Error("offline"); } });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+
+  assert.ok(shadow.querySelector('[data-pr-key="acme/api#1"] .row-merge-action'));
+  assert.equal(shadow.querySelector('[data-pr-key="acme/api#2"] .row-merge-action'), null);
+  assert.equal(shadow.querySelector('[data-pr-key="acme/api#3"] .row-merge-action'), null);
+  assert.equal(shadow.querySelector('[data-pr-key="acme/api#4"] .row-merge-action'), null);
+  assert.equal(shadow.querySelector('[data-pr-key="acme/api#5"] .row-merge-action'), null);
+});
+
+test("a failed direct row merge exposes an alert while the drawer stays closed", async () => {
+  const dom = makeDom();
+  dom.window.confirm = () => true;
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+    },
+    detailCache: {}
+  });
+  let actionPhase = false;
+  let failMerge = true;
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (_url, options = {}) => {
+      if (!actionPhase) {
+        throw new Error("offline");
+      }
+      if (failMerge) {
+        throw new Error("merge request failed");
+      }
+      if (options.method === "POST") {
+        return { ok: true, status: 200, text: async () => '<span class="State State--merged">Merged</span>' };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => `
+          <form action="/acme/api/pull/1/merge" method="post">
+            <input type="hidden" name="authenticity_token" value="csrf">
+            <input type="hidden" name="head_sha" value="abc123">
+            <input name="commit_title" value="One (#1)">
+            <textarea name="commit_message">generated body</textarea>
+            <input type="hidden" name="do" value="squash">
+          </form>`
+      };
+    }
+  });
+  await app.init();
+  actionPhase = true;
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".row-merge-action").click();
+  await waitFor(() => app.getState().prAction.error, "row merge error");
+
+  const alert = shadow.querySelector('[role="alert"]');
+  assert.equal(app.getState().selectedKey, null);
+  assert.equal(shadow.querySelector(".drawer").hidden, true);
+  assert.ok(alert);
+  assert.equal(alert.closest(".drawer"), null);
+  assert.match(alert.textContent, /merge request failed/i);
+  assert.ok(shadow.querySelector('[data-pr-key="acme/api#1"]'));
+  assert.equal(shadow.querySelector(".row-merge-action").disabled, false);
+
+  failMerge = false;
+  shadow.querySelector(".row-merge-action").click();
+  await waitFor(() => app.getState().allSummaries.length === 0, "row merge retry");
+  assert.equal(shadow.querySelector(".warning").hidden, true);
+});
+
+test("a failed drawer merge announces the error only once", async () => {
+  const dom = makeDom();
+  dom.window.confirm = () => true;
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+    },
+    detailCache: {}
+  });
+  let actionPhase = false;
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => {
+      if (!actionPhase) {
+        throw new Error("offline");
+      }
+      throw new Error("drawer merge failed");
+    }
+  });
+  await app.init();
+  actionPhase = true;
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  shadow.querySelector(".drawer .merge-action").click();
+  await waitFor(() => app.getState().prAction.error, "drawer merge error");
+
+  const visibleAlerts = [...shadow.querySelectorAll('[role="alert"]')].filter((element) => !element.hidden);
+  assert.equal(visibleAlerts.length, 1);
+  assert.equal(visibleAlerts[0].classList.contains("pr-action-error"), true);
+  assert.match(visibleAlerts[0].textContent, /drawer merge failed/i);
+});
+
 test("merge action confirms, forces squash with an empty message body, and removes only the open-list item", async () => {
   const dom = makeDom();
   dom.window.confirm = () => true;
@@ -705,7 +984,7 @@ test("merge action confirms, forces squash with an empty message body, and remov
   actionPhase = true;
   const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
   shadow.querySelector(".pr-row-select").click();
-  shadow.querySelector(".merge-action").click();
+  shadow.querySelector(".drawer .merge-action").click();
   await waitFor(() => app.getState().allSummaries.length === 0, "merge completion");
 
   assert.equal(calls.length, 2);

@@ -359,7 +359,9 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     delete latest.detailCache[key];
     await storage.save(latest);
     state.allSummaries = state.allSummaries.filter((summary) => summary.key !== key);
-    state.selectedKey = null;
+    if (state.selectedKey === key) {
+      state.selectedKey = null;
+    }
     state.prAction = { key: null, type: null, pending: false, error: "" };
     state.filteredSummaries = computeFiltered();
     render();
@@ -492,6 +494,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         if (!confirmed) {
           return;
         }
+        state.warning = "";
         state.prAction = { key, type: "merge", pending: true, error: "" };
         render();
         try {
@@ -500,6 +503,9 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
           await removeOpenSummary(key);
         } catch (error) {
           state.prAction = { key, type: "merge", pending: false, error: error.message };
+          if (state.selectedKey !== key) {
+            state.warning = `Merge failed for ${summary.owner}/${summary.repo}#${summary.number}. ${error.message}`;
+          }
           render();
         }
       },

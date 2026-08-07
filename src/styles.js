@@ -590,6 +590,10 @@ select {
   background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.16));
   text-decoration: underline;
 }
+.row-merge-action {
+  min-width: 64px;
+  white-space: nowrap;
+}
 .quick-status {
   position: relative;
   width: 156px;
@@ -909,11 +913,13 @@ select {
       "controls";
   }
   .row-controls {
+    flex-wrap: wrap;
     margin: 0 16px 14px 52px;
   }
   .quick-status {
     flex: 1;
     width: auto;
+    min-width: 140px;
   }
 }
 `;

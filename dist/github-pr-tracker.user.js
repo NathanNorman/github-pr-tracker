@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.6.2
+// @version      1.7.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.6.2
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -1967,6 +1967,10 @@ select {
   background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.16));
   text-decoration: underline;
 }
+.row-merge-action {
+  min-width: 64px;
+  white-space: nowrap;
+}
 .quick-status {
   position: relative;
   width: 156px;
@@ -2286,11 +2290,13 @@ select {
       "controls";
   }
   .row-controls {
+    flex-wrap: wrap;
     margin: 0 16px 14px 52px;
   }
   .quick-status {
     flex: 1;
     width: auto;
+    min-width: 140px;
   }
 }
 `;
@@ -2438,6 +2444,7 @@ select {
     panelHeader.append(resultCount, panelActions);
     const warning = doc.createElement("div");
     warning.className = "warning";
+    warning.setAttribute("role", "alert");
     const list = doc.createElement("div");
     list.className = "list";
     panel.append(panelHeader, warning, list);
@@ -2739,6 +2746,22 @@ select {
           quickStatus.append(quickLabel, statusSelect);
           const rowControls = doc.createElement("div");
           rowControls.className = "row-controls";
+          const actionPending = Boolean(state.prAction?.pending);
+          const rowMergePending = actionPending && state.prAction.key === summary.key && state.prAction.type === "merge";
+          if (summary.merge === "clean" && !summary.draft) {
+            const rowMergeButton = makeActionButton(
+              rowMergePending ? "Merging\u2026" : "Merge",
+              () => void handlers.onMerge(summary.key),
+              "action-btn merge-action row-merge-action"
+            );
+            rowMergeButton.disabled = actionPending;
+            rowMergeButton.title = "Squash merge with an empty commit message";
+            rowMergeButton.setAttribute(
+              "aria-label",
+              `Squash and merge ${summary.owner}/${summary.repo} #${summary.number} with an empty commit message`
+            );
+            rowControls.append(rowMergeButton);
+          }
           const openLink = doc.createElement("a");
           openLink.className = "row-open-link";
           openLink.href = summary.url;
@@ -2818,10 +2841,11 @@ select {
       prActionsLabel.textContent = "GitHub actions";
       const prActionButtons = doc.createElement("div");
       prActionButtons.className = "pr-action-buttons";
-      const actionPending = state.prAction?.pending && state.prAction.key === state.selectedKey;
+      const actionPending = Boolean(state.prAction?.pending);
+      const selectedActionPending = actionPending && state.prAction.key === state.selectedKey;
       if (summary?.merge === "clean" && !summary.draft) {
         const mergeButton = makeActionButton(
-          actionPending && state.prAction.type === "merge" ? "Merging\u2026" : "Squash & merge",
+          selectedActionPending && state.prAction.type === "merge" ? "Merging\u2026" : "Squash & merge",
           () => void handlers.onMerge(state.selectedKey),
           "action-btn merge-action"
         );
@@ -2829,7 +2853,7 @@ select {
         prActionButtons.append(mergeButton);
       }
       const closePrButton = makeActionButton(
-        actionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close PR",
+        selectedActionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close PR",
         () => {
           closePromptKey = state.selectedKey;
           closeComment = "";
@@ -2864,7 +2888,7 @@ select {
           renderDrawer(currentState);
         }, "action-btn");
         const confirmClose = makeActionButton(
-          actionPending ? "Closing\u2026" : "Close pull request",
+          selectedActionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close pull request",
           () => void handlers.onClosePullRequest(state.selectedKey, closeComment),
           "action-btn close-confirm"
         );
@@ -3589,7 +3613,9 @@ select {
       delete latest.detailCache[key];
       await storage.save(latest);
       state.allSummaries = state.allSummaries.filter((summary) => summary.key !== key);
-      state.selectedKey = null;
+      if (state.selectedKey === key) {
+        state.selectedKey = null;
+      }
       state.prAction = { key: null, type: null, pending: false, error: "" };
       state.filteredSummaries = computeFiltered();
       render();
@@ -3720,6 +3746,7 @@ GitHub's default commit title will be kept and the commit message body will be e
           if (!confirmed) {
             return;
           }
+          state.warning = "";
           state.prAction = { key, type: "merge", pending: true, error: "" };
           render();
           try {
@@ -3728,6 +3755,9 @@ GitHub's default commit title will be kept and the commit message body will be e
             await removeOpenSummary(key);
           } catch (error) {
             state.prAction = { key, type: "merge", pending: false, error: error.message };
+            if (state.selectedKey !== key) {
+              state.warning = `Merge failed for ${summary.owner}/${summary.repo}#${summary.number}. ${error.message}`;
+            }
             render();
           }
         },

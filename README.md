@@ -25,6 +25,7 @@ Fallback import steps:
 - The tracker shows only your open authored pull requests from same-origin Toast GitHub results.
 - Change personal status directly from the pull request list; choosing `Blocked` opens the private detail panel for blocker context.
 - Use each row's `Open` link to go straight to the pull request without opening the personal detail panel first.
+- Eligible, non-draft rows include a green `Merge` button. It uses the same confirmed native squash-merge flow as the detail panel and submits an empty commit-message body.
 - Each row shows the current unresolved review-conversation count when GitHub's Files view can confirm it.
 - Use `Refresh` to bypass the 10-minute detail cache and refetch current per-PR review/check/merge/thread state.
 - Personal statuses are `unsorted`, `next_up`, `waiting`, `blocked`, and `done`.
@@ -34,7 +35,7 @@ Fallback import steps:
 - Use the compact `Sort` menu to choose a primary group and an optional secondary order within each group. Repository grouping creates separate sections such as `toast-analytics` and `toast-archiving`; status, update timeframe, review, checks, title initial, and PR-number ranges can also be used as groups.
 - Grouping defaults to newest update timeframe first, then repository within each section. Filter and sort selections are saved locally for the next visit.
 - Press `Escape` or click outside to close Filter, Sort, Backup, or the personal PR panel.
-- A green `Squash & merge` action appears only when the cached GitHub state says a PR is mergeable. It re-checks GitHub's native form, preserves GitHub's default squash title, clears the commit-message body, and requires confirmation.
+- Green `Merge` and `Squash & merge` actions appear only when the cached GitHub state says a PR is mergeable. They re-check GitHub's native form, preserve GitHub's default squash title, clear the commit-message body, and require confirmation.
 - `Close PR` opens an inline confirmation with an optional closing comment. GitHub's native combined comment-and-close form performs the action.
 
 ## Personal Data And Backup

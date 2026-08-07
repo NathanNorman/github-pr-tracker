@@ -120,6 +120,28 @@ test("action helpers reject cross-origin and wrong-PR forms without posting", as
   }
 });
 
+test("squashMergePullRequest refuses forms without a nonempty head SHA", async () => {
+  for (const headControl of ["", '<input type="hidden" name="head_sha" value="">']) {
+    let requests = 0;
+    const html = mergePage().replace(
+      '<input type="hidden" name="head_sha" value="abc123">',
+      headControl
+    );
+    await assert.rejects(
+      squashMergePullRequest({
+        fetchImpl: async () => {
+          requests += 1;
+          return response(html);
+        },
+        parser,
+        summary
+      }),
+      /head_sha|authenticated values/
+    );
+    assert.equal(requests, 1);
+  }
+});
+
 test("action helpers reject non-ok GET and POST responses without retrying", async () => {
   let getRequests = 0;
   await assert.rejects(

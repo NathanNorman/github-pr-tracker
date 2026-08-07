@@ -162,6 +162,7 @@ export function createUi(container, handlers) {
 
   const warning = doc.createElement("div");
   warning.className = "warning";
+  warning.setAttribute("role", "alert");
   const list = doc.createElement("div");
   list.className = "list";
   panel.append(panelHeader, warning, list);
@@ -498,6 +499,23 @@ export function createUi(container, handlers) {
 
       const rowControls = doc.createElement("div");
       rowControls.className = "row-controls";
+      const actionPending = Boolean(state.prAction?.pending);
+      const rowMergePending =
+        actionPending && state.prAction.key === summary.key && state.prAction.type === "merge";
+      if (summary.merge === "clean" && !summary.draft) {
+        const rowMergeButton = makeActionButton(
+          rowMergePending ? "Merging…" : "Merge",
+          () => void handlers.onMerge(summary.key),
+          "action-btn merge-action row-merge-action"
+        );
+        rowMergeButton.disabled = actionPending;
+        rowMergeButton.title = "Squash merge with an empty commit message";
+        rowMergeButton.setAttribute(
+          "aria-label",
+          `Squash and merge ${summary.owner}/${summary.repo} #${summary.number} with an empty commit message`
+        );
+        rowControls.append(rowMergeButton);
+      }
       const openLink = doc.createElement("a");
       openLink.className = "row-open-link";
       openLink.href = summary.url;
@@ -589,11 +607,12 @@ export function createUi(container, handlers) {
     prActionsLabel.textContent = "GitHub actions";
     const prActionButtons = doc.createElement("div");
     prActionButtons.className = "pr-action-buttons";
-    const actionPending = state.prAction?.pending && state.prAction.key === state.selectedKey;
+    const actionPending = Boolean(state.prAction?.pending);
+    const selectedActionPending = actionPending && state.prAction.key === state.selectedKey;
 
     if (summary?.merge === "clean" && !summary.draft) {
       const mergeButton = makeActionButton(
-        actionPending && state.prAction.type === "merge" ? "Merging…" : "Squash & merge",
+        selectedActionPending && state.prAction.type === "merge" ? "Merging…" : "Squash & merge",
         () => void handlers.onMerge(state.selectedKey),
         "action-btn merge-action"
       );
@@ -602,7 +621,7 @@ export function createUi(container, handlers) {
     }
 
     const closePrButton = makeActionButton(
-      actionPending && state.prAction.type === "close" ? "Closing…" : "Close PR",
+      selectedActionPending && state.prAction.type === "close" ? "Closing…" : "Close PR",
       () => {
         closePromptKey = state.selectedKey;
         closeComment = "";
@@ -638,7 +657,7 @@ export function createUi(container, handlers) {
         renderDrawer(currentState);
       }, "action-btn");
       const confirmClose = makeActionButton(
-        actionPending ? "Closing…" : "Close pull request",
+        selectedActionPending && state.prAction.type === "close" ? "Closing…" : "Close pull request",
         () => void handlers.onClosePullRequest(state.selectedKey, closeComment),
         "action-btn close-confirm"
       );
