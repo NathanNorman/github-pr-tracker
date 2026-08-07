@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.5.1
+// @version      1.6.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.5.1
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.6.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -21,7 +21,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 3;
+  var DETAIL_PARSER_VERSION = 4;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -271,6 +271,29 @@
     const dom = detailFromDom(doc);
     return mergeNativeDetails(embedded, dom);
   }
+  function parseUnresolvedThreadCountDocument(doc) {
+    const candidates = [
+      ...doc.querySelectorAll(
+        ".js-resolvable-timeline-thread-container, .js-resolvable-thread, [data-review-thread-id], [data-pull-review-thread-id]"
+      )
+    ];
+    const threadRoots = candidates.filter(
+      (candidate) => !candidates.some((other) => other !== candidate && other.contains(candidate))
+    );
+    if (threadRoots.length) {
+      return threadRoots.filter((thread) => !isResolvedThread(thread)).length;
+    }
+    const conversationButtons = [...doc.querySelectorAll("button, input[type='submit']")].map((node) => (node.textContent || node.getAttribute("value") || "").trim()).filter((label) => /^(?:un)?resolve (?:conversation|thread)$/i.test(label));
+    if (conversationButtons.length) {
+      return conversationButtons.filter((label) => /^resolve /i.test(label)).length;
+    }
+    if (doc.querySelector(
+      ".js-diff-progressive-container, #files, [data-diff-anchor], [data-path][data-tagsearch-path], .js-file"
+    )) {
+      return 0;
+    }
+    return void 0;
+  }
   function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
     const baseOrigin = new URL(baseUrl, GITHUB_ORIGIN).origin;
     const candidateAttributes = [
@@ -309,12 +332,24 @@
   function mergeNativeDetails(primary, fallback) {
     const left = primary || {};
     const right = fallback || {};
-    return {
+    const merged = {
       review: left.review && left.review !== "unknown" ? left.review : right.review || "unknown",
       checks: left.checks && left.checks !== "unknown" ? left.checks : right.checks || "unknown",
       merge: left.merge && left.merge !== "unknown" ? left.merge : right.merge || "unknown",
       draft: typeof left.draft === "boolean" ? left.draft : right.draft
     };
+    const unresolvedThreads = Number.isInteger(left.unresolvedThreads) ? left.unresolvedThreads : Number.isInteger(right.unresolvedThreads) ? right.unresolvedThreads : void 0;
+    if (Number.isInteger(unresolvedThreads) && unresolvedThreads >= 0) {
+      merged.unresolvedThreads = unresolvedThreads;
+    }
+    return merged;
+  }
+  function isResolvedThread(thread) {
+    if (thread.matches('.is-resolved, [data-resolved="true" i], [data-is-resolved="true" i]') || thread.querySelector('.is-resolved, [data-resolved="true" i], [data-is-resolved="true" i]')) {
+      return true;
+    }
+    const controlsText = [...thread.querySelectorAll("button, input[type='submit']")].map((node) => node.textContent || node.getAttribute("value") || "").join(" ");
+    return /unresolve (?:conversation|thread)/i.test(controlsText);
   }
   function extractNestedPayloadDetail(root) {
     const stack = [root];
@@ -1052,6 +1087,219 @@
     return { review, checks, merge: "unknown" };
   }
 
+  // src/github-actions.js
+  var FORM_CONTENT_TYPE = "application/x-www-form-urlencoded;charset=UTF-8";
+  var HTML_ACCEPT = "text/html,application/xhtml+xml";
+  async function squashMergePullRequest({ fetchImpl, parser, summary }) {
+    return submitPullRequestAction({
+      fetchImpl,
+      parser,
+      summary,
+      action: "merge",
+      configure(form, fields) {
+        requireSuccessfulFields(fields, ["authenticity_token", "head_sha", "commit_title", "commit_message"]);
+        const squashControl = form.querySelector('input[type="hidden"][name="do"]');
+        if (!squashControl || squashControl.value !== "squash" || squashControl.matches(":disabled")) {
+          throw new Error("The native squash merge form is missing its squash action control.");
+        }
+        if (!fields.get("authenticity_token") || !fields.get("head_sha")) {
+          throw new Error("The native squash merge form is missing required authenticated values.");
+        }
+        fields.set("commit_message", "");
+        fields.set("do", "squash");
+      },
+      expectedState: "merged"
+    });
+  }
+  async function closePullRequest({ fetchImpl, parser, summary, comment = "" }) {
+    return submitPullRequestAction({
+      fetchImpl,
+      parser,
+      summary,
+      action: "close",
+      configure(form, fields) {
+        requireSuccessfulFields(fields, ["authenticity_token", "comment[body]"]);
+        const closeButton = form.querySelector('button[name="comment_and_close"]');
+        if (!closeButton || closeButton.value !== "1" || closeButton.matches(":disabled")) {
+          throw new Error("The native close form is missing its comment-and-close submit control.");
+        }
+        if (!fields.get("authenticity_token")) {
+          throw new Error("The native close form is missing its authenticated value.");
+        }
+        fields.set("comment[body]", String(comment ?? ""));
+        fields.set("comment_and_close", "1");
+      },
+      expectedState: "closed"
+    });
+  }
+  async function submitPullRequestAction({ fetchImpl, parser, summary, action, configure, expectedState }) {
+    if (typeof fetchImpl !== "function" || typeof parser !== "function") {
+      throw new TypeError("A fetch implementation and HTML parser are required.");
+    }
+    const pullRequest = parseCanonicalPullRequest(summary);
+    const getResponse = await fetchImpl(summary.url, {
+      credentials: "include",
+      headers: { Accept: HTML_ACCEPT }
+    });
+    assertOkResponse(getResponse, `Loading pull request #${pullRequest.number}`);
+    const pageHtml = await getResponse.text();
+    const pageDocument = parseDocument(parser, pageHtml, pullRequest.url.href);
+    const { form, actionUrl } = findNativeForm(pageDocument, pullRequest, action);
+    const fields = serializeSuccessfulControls(form);
+    configure(form, fields);
+    const postResponse = await fetchImpl(actionUrl.href, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: HTML_ACCEPT,
+        "Content-Type": FORM_CONTENT_TYPE
+      },
+      body: fields.toString()
+    });
+    assertOkResponse(postResponse, `${action === "merge" ? "Merging" : "Closing"} pull request #${pullRequest.number}`);
+    const responseHtml = await postResponse.text();
+    const responseDocument = parseDocument(parser, responseHtml, pullRequest.url.href);
+    if (!documentConfirmsState(responseDocument, expectedState)) {
+      throw new Error(`GitHub did not confirm that pull request #${pullRequest.number} was ${expectedState}.`);
+    }
+    return { state: expectedState };
+  }
+  function parseCanonicalPullRequest(summary) {
+    if (!summary || typeof summary.url !== "string" || !summary.url) {
+      throw new TypeError("A pull request summary with a URL is required.");
+    }
+    let url;
+    try {
+      url = new URL(summary.url);
+    } catch {
+      throw new Error("The pull request URL is invalid.");
+    }
+    if (url.origin !== GITHUB_ORIGIN) {
+      throw new Error("The pull request URL must use the authenticated GitHub origin.");
+    }
+    const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)\/?$/);
+    if (!match || url.search || url.hash) {
+      throw new Error("The pull request URL must identify one canonical pull request.");
+    }
+    const [, owner, repo, numberText] = match;
+    const number = Number(numberText);
+    if (summary.owner != null && String(summary.owner) !== owner || summary.repo != null && String(summary.repo) !== repo || summary.number != null && Number(summary.number) !== number) {
+      throw new Error("The pull request summary does not match its URL.");
+    }
+    return {
+      url,
+      owner,
+      repo,
+      number,
+      path: `/${owner}/${repo}/pull/${numberText}`
+    };
+  }
+  function findNativeForm(doc, pullRequest, action) {
+    const expectedPath = action === "merge" ? `${pullRequest.path}/merge` : `${pullRequest.path}/comment`;
+    for (const form of doc.querySelectorAll("form")) {
+      if ((form.getAttribute("method") || "get").trim().toLowerCase() !== "post") {
+        continue;
+      }
+      const rawAction = form.getAttribute("action");
+      if (!rawAction) {
+        continue;
+      }
+      let actionUrl;
+      try {
+        actionUrl = new URL(rawAction, pullRequest.url);
+      } catch {
+        continue;
+      }
+      if (actionUrl.origin !== pullRequest.url.origin || actionUrl.pathname !== expectedPath || actionUrl.hash) {
+        continue;
+      }
+      if (action === "merge" && actionUrl.search) {
+        continue;
+      }
+      if (action === "close" && !hasExactStickyQuery(actionUrl)) {
+        continue;
+      }
+      return { form, actionUrl };
+    }
+    throw new Error(`No valid same-origin native ${action} form was found for this pull request.`);
+  }
+  function hasExactStickyQuery(url) {
+    const entries = [...url.searchParams.entries()];
+    return entries.length === 1 && entries[0][0] === "sticky" && entries[0][1] === "true";
+  }
+  function serializeSuccessfulControls(form) {
+    const fields = new URLSearchParams();
+    for (const control of form.elements) {
+      const name = control.getAttribute("name") || "";
+      if (!name || control.matches(":disabled")) {
+        continue;
+      }
+      const tagName = control.tagName.toLowerCase();
+      if (tagName === "button") {
+        continue;
+      }
+      if (tagName === "select") {
+        for (const option of control.selectedOptions) {
+          if (!option.disabled) {
+            fields.append(name, option.value);
+          }
+        }
+        continue;
+      }
+      const type = (control.getAttribute("type") || "").toLowerCase();
+      if (["button", "submit", "reset", "image", "file"].includes(type)) {
+        continue;
+      }
+      if (["checkbox", "radio"].includes(type) && !control.checked) {
+        continue;
+      }
+      fields.append(name, control.value);
+    }
+    return fields;
+  }
+  function requireSuccessfulFields(fields, names) {
+    for (const name of names) {
+      if (!fields.has(name)) {
+        throw new Error(`The native form is missing the required ${name} control.`);
+      }
+    }
+  }
+  function parseDocument(parser, html, url) {
+    const doc = parser(html, url);
+    if (!doc || typeof doc.querySelectorAll !== "function") {
+      throw new Error("The HTML parser did not return a document.");
+    }
+    return doc;
+  }
+  function assertOkResponse(response, context) {
+    if (!response || !response.ok) {
+      const status = response?.status == null ? "unknown" : response.status;
+      throw new Error(`${context} failed with HTTP ${status}.`);
+    }
+  }
+  function documentConfirmsState(doc, state) {
+    const title = state[0].toUpperCase() + state.slice(1);
+    const selectors = [
+      `.State--${state}`,
+      `[title="Status: ${title}"]`,
+      `[aria-label="Status: ${title}"]`,
+      `[data-test-selector="pr-state"][data-state="${state}"]`,
+      `[aria-label="Pull request state"][data-state="${state}"]`
+    ];
+    for (const element of doc.querySelectorAll(selectors.join(","))) {
+      const semanticValue = [
+        element.getAttribute("data-state"),
+        element.getAttribute("title")?.replace(/^Status:\s*/i, ""),
+        element.getAttribute("aria-label")?.replace(/^(?:Status:\s*|Pull request state\s*:?\s*)/i, ""),
+        element.textContent
+      ].filter(Boolean).map((value) => value.trim().toLowerCase());
+      if (semanticValue.includes(state)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // src/styles.js
   var styles = `
 :host {
@@ -1472,10 +1720,10 @@ select {
 }
 .pr-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 156px;
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
-    "select status"
-    "tags status";
+    "select controls"
+    "tags controls";
   align-items: center;
   border-top: 1px solid var(--borderColor-muted, #d8dee4);
 }
@@ -1562,6 +1810,16 @@ select {
   color: var(--fgColor-muted, #59636e);
   font-size: 12px;
 }
+.thread-count::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 6px;
+  margin-right: 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  vertical-align: 0;
+}
 .badge {
   white-space: nowrap;
 }
@@ -1601,10 +1859,32 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.row-controls {
+  grid-area: controls;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 0 8px;
+}
+.row-open-link {
+  min-height: 32px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--fgColor-accent, #0969da);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.row-open-link:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.16));
+  text-decoration: underline;
+}
 .quick-status {
   position: relative;
-  grid-area: status;
-  margin: 0 14px 0 4px;
+  width: 156px;
+  margin: 0;
 }
 .quick-status::before {
   content: "";
@@ -1706,6 +1986,54 @@ select {
 }
 .drawer-identity .title {
   white-space: normal;
+}
+.pr-actions {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 8px;
+  background: var(--bgColor-muted, #f6f8fa);
+}
+.pr-action-buttons,
+.close-prompt-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.merge-action {
+  border-color: var(--borderColor-success-emphasis, #1a7f37);
+  background: var(--button-primary-bgColor-rest, #1f883d);
+  color: var(--button-primary-fgColor-rest, #ffffff);
+}
+.merge-action:hover:not(:disabled) {
+  background: var(--button-primary-bgColor-hover, #1a7f37);
+}
+.close-action,
+.close-confirm {
+  color: var(--fgColor-danger, #d1242f);
+}
+.close-confirm {
+  border-color: var(--borderColor-danger-emphasis, #cf222e);
+}
+.close-prompt {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+.drawer .close-comment {
+  min-height: 76px;
+  margin-top: 6px;
+  font-weight: 400;
+}
+.pr-action-error {
+  padding: 8px 10px;
+  border: 1px solid var(--borderColor-danger-muted, rgba(255,129,130,0.4));
+  border-radius: 6px;
+  background: var(--bgColor-danger-muted, rgba(255,129,130,0.15));
+  color: var(--fgColor-danger, #d1242f);
+  font-size: 12px;
 }
 .field {
   display: grid;
@@ -1869,10 +2197,14 @@ select {
     grid-template-areas:
       "select"
       "tags"
-      "status";
+      "controls";
+  }
+  .row-controls {
+    margin: 0 16px 14px 52px;
   }
   .quick-status {
-    margin: 0 16px 14px 52px;
+    flex: 1;
+    width: auto;
   }
 }
 `;
@@ -2023,6 +2355,58 @@ select {
     let focusedBeforeDrawer = null;
     let currentState = null;
     let currentSelectedKey = null;
+    let closePromptKey = null;
+    let closeComment = "";
+    const disclosureMenus = [backupMenu, filterMenu, sortMenu];
+    function dismissDisclosures(path = []) {
+      for (const menu of disclosureMenus) {
+        if (menu.open && !path.includes(menu)) {
+          menu.open = false;
+        }
+      }
+    }
+    async function dismissDrawer({ restoreFocus: restoreFocus2 = false } = {}) {
+      const key = currentState?.selectedKey;
+      if (!key) {
+        return;
+      }
+      await flushPending(key);
+      handlers.onSelect(null);
+      if (restoreFocus2 && focusedBeforeDrawer instanceof HTMLElement) {
+        focusedBeforeDrawer.focus();
+      }
+    }
+    function eventPath(event) {
+      return typeof event.composedPath === "function" ? event.composedPath() : [event.target];
+    }
+    function onDocumentPointerDown(event) {
+      const path = eventPath(event);
+      dismissDisclosures(path);
+      const clickedPrRow = path.some((node) => node instanceof HTMLElement && node.classList.contains("pr-row"));
+      if (currentState?.selectedKey && !path.includes(drawer) && !clickedPrRow) {
+        void dismissDrawer();
+      }
+    }
+    function onDocumentKeyDown(event) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      const openMenus = disclosureMenus.filter((menu) => menu.open);
+      if (openMenus.length) {
+        for (const menu of openMenus) {
+          menu.open = false;
+        }
+        openMenus.at(-1)?.querySelector("summary")?.focus();
+        event.preventDefault();
+        return;
+      }
+      if (currentState?.selectedKey) {
+        event.preventDefault();
+        void dismissDrawer({ restoreFocus: true });
+      }
+    }
+    doc.addEventListener("pointerdown", onDocumentPointerDown, true);
+    doc.addEventListener("keydown", onDocumentKeyDown, true);
     function render(state) {
       const focusSnapshot = captureFocus();
       currentState = state;
@@ -2170,13 +2554,13 @@ select {
           rowButton.setAttribute("aria-label", `Edit personal tracking for ${summary.title}`);
           rowButton.addEventListener("click", () => {
             focusedBeforeDrawer = shadow.activeElement;
-            handlers.onSelect(summary.key);
+            handlers.onSelect(currentState?.selectedKey === summary.key ? null : summary.key);
           });
           rowButton.addEventListener("keydown", (event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               focusedBeforeDrawer = shadow.activeElement;
-              handlers.onSelect(summary.key);
+              handlers.onSelect(currentState?.selectedKey === summary.key ? null : summary.key);
             }
           });
           const rowIcon = doc.createElement("span");
@@ -2200,6 +2584,12 @@ select {
           appendKnownBadge(details, "Review", summary.review);
           appendKnownBadge(details, "Checks", summary.checks);
           appendKnownBadge(details, "Merge", summary.merge);
+          if (Number.isInteger(summary.unresolvedThreads)) {
+            const threads = doc.createElement("span");
+            threads.className = "thread-count";
+            threads.textContent = `${summary.unresolvedThreads} unresolved ${summary.unresolvedThreads === 1 ? "thread" : "threads"}`;
+            details.append(threads);
+          }
           if (summary.draft) {
             const draftBadge = makeBadge("Draft", "draft");
             draftBadge.textContent = "Draft";
@@ -2235,7 +2625,17 @@ select {
           statusSelect.className = "status-select";
           statusSelect.addEventListener("change", () => handlers.onQuickStatus(summary.key, statusSelect.value));
           quickStatus.append(quickLabel, statusSelect);
-          row.append(rowButton, quickStatus);
+          const rowControls = doc.createElement("div");
+          rowControls.className = "row-controls";
+          const openLink = doc.createElement("a");
+          openLink.className = "row-open-link";
+          openLink.href = summary.url;
+          openLink.target = "_blank";
+          openLink.rel = "noreferrer";
+          openLink.textContent = "Open \u2197";
+          openLink.setAttribute("aria-label", `Open ${summary.title} on GitHub`);
+          rowControls.append(openLink, quickStatus);
+          row.append(rowButton, rowControls);
           if (record.tags.length) {
             const tags = doc.createElement("div");
             tags.className = "tags row-tags";
@@ -2261,8 +2661,14 @@ select {
       if (!state.selectedKey) {
         void flushPending(currentSelectedKey);
         currentSelectedKey = null;
+        closePromptKey = null;
+        closeComment = "";
         drawer.textContent = "";
         return;
+      }
+      if (closePromptKey && closePromptKey !== state.selectedKey) {
+        closePromptKey = null;
+        closeComment = "";
       }
       const summary = state.allSummaries.find((item) => item.key === state.selectedKey) || state.filteredSummaries.find((item) => item.key === state.selectedKey);
       const record = state.records[state.selectedKey] || DEFAULT_RECORD;
@@ -2282,13 +2688,7 @@ select {
       close.className = "icon-btn";
       close.textContent = "\xD7";
       close.setAttribute("aria-label", "Close personal tracking panel");
-      close.addEventListener("click", async () => {
-        await flushPending(state.selectedKey);
-        handlers.onSelect(null);
-        if (focusedBeforeDrawer instanceof HTMLElement) {
-          focusedBeforeDrawer.focus();
-        }
-      });
+      close.addEventListener("click", () => void dismissDrawer({ restoreFocus: true }));
       header.append(headerText, close);
       const identity = doc.createElement("div");
       identity.className = "drawer-identity";
@@ -2299,6 +2699,76 @@ select {
       identityRepo.className = "repo";
       identityRepo.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
       identity.append(identityTitle, identityRepo);
+      const prActions = doc.createElement("section");
+      prActions.className = "pr-actions";
+      const prActionsLabel = doc.createElement("div");
+      prActionsLabel.className = "field-label";
+      prActionsLabel.textContent = "GitHub actions";
+      const prActionButtons = doc.createElement("div");
+      prActionButtons.className = "pr-action-buttons";
+      const actionPending = state.prAction?.pending && state.prAction.key === state.selectedKey;
+      if (summary?.merge === "clean" && !summary.draft) {
+        const mergeButton = makeActionButton(
+          actionPending && state.prAction.type === "merge" ? "Merging\u2026" : "Squash & merge",
+          () => void handlers.onMerge(state.selectedKey),
+          "action-btn merge-action"
+        );
+        mergeButton.disabled = actionPending;
+        prActionButtons.append(mergeButton);
+      }
+      const closePrButton = makeActionButton(
+        actionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close PR",
+        () => {
+          closePromptKey = state.selectedKey;
+          closeComment = "";
+          renderDrawer(currentState);
+          drawer.querySelector(".close-comment")?.focus();
+        },
+        "action-btn close-action"
+      );
+      closePrButton.disabled = actionPending;
+      prActionButtons.append(closePrButton);
+      prActions.append(prActionsLabel, prActionButtons);
+      if (closePromptKey === state.selectedKey) {
+        const closePrompt = doc.createElement("div");
+        closePrompt.className = "close-prompt";
+        const closePromptLabel = doc.createElement("label");
+        closePromptLabel.className = "field-label";
+        closePromptLabel.textContent = "Optional closing comment";
+        const closeCommentInput = doc.createElement("textarea");
+        closeCommentInput.className = "close-comment";
+        closeCommentInput.rows = 3;
+        closeCommentInput.placeholder = "Add context before closing\u2026";
+        closeCommentInput.value = closeComment;
+        closeCommentInput.addEventListener("input", () => {
+          closeComment = closeCommentInput.value;
+        });
+        closePromptLabel.append(closeCommentInput);
+        const closePromptButtons = doc.createElement("div");
+        closePromptButtons.className = "close-prompt-buttons";
+        const cancelClose = makeActionButton("Cancel", () => {
+          closePromptKey = null;
+          closeComment = "";
+          renderDrawer(currentState);
+        }, "action-btn");
+        const confirmClose = makeActionButton(
+          actionPending ? "Closing\u2026" : "Close pull request",
+          () => void handlers.onClosePullRequest(state.selectedKey, closeComment),
+          "action-btn close-confirm"
+        );
+        cancelClose.disabled = actionPending;
+        confirmClose.disabled = actionPending;
+        closePromptButtons.append(cancelClose, confirmClose);
+        closePrompt.append(closePromptLabel, closePromptButtons);
+        prActions.append(closePrompt);
+      }
+      if (state.prAction?.key === state.selectedKey && state.prAction.error) {
+        const actionError = doc.createElement("div");
+        actionError.className = "pr-action-error";
+        actionError.setAttribute("role", "alert");
+        actionError.textContent = state.prAction.error;
+        prActions.append(actionError);
+      }
       const statusField = makeField("My status");
       const statusSelect = makeStatusSelect(record.status);
       statusSelect.setAttribute("data-focus-id", "status");
@@ -2380,7 +2850,7 @@ select {
       link.textContent = "Open on GitHub \u2197";
       saveState.textContent = state.saveState;
       footer.append(saveState, link);
-      drawer.append(header, identity, statusField, blockerField, tagsField, notesField, footer);
+      drawer.append(header, identity, prActions, statusField, blockerField, tagsField, notesField, footer);
     }
     function makeStatusSelect(selectedStatus) {
       const select = doc.createElement("select");
@@ -2630,7 +3100,12 @@ select {
     checksSelect.addEventListener("change", () => {
       void handlers.onFilterChange({ checks: checksSelect.value });
     });
-    return { render, shadow, flushPending, setSaveState };
+    function dismiss() {
+      dismissDisclosures();
+      closePromptKey = null;
+      closeComment = "";
+    }
+    return { render, shadow, flushPending, setSaveState, dismiss };
   }
   function countStatuses(state) {
     const counts = Object.fromEntries(PERSONAL_STATUSES.map((status) => [status, 0]));
@@ -2713,6 +3188,7 @@ select {
       filterPreferences: DEFAULT_FILTER_PREFERENCES,
       sortPreferences: null,
       selectedKey: null,
+      prAction: { key: null, type: null, pending: false, error: "" },
       showCompleted: false,
       refreshing: false,
       warning: "",
@@ -2856,6 +3332,7 @@ select {
     }
     function unmount() {
       void ui?.flushPending();
+      ui?.dismiss?.();
       if (host) {
         host.remove();
       }
@@ -2942,38 +3419,59 @@ select {
       const prDocument = parser(html);
       let detail = parsePrDetailDocument(prDocument);
       const needsDeferred = detail.review === "unknown" || detail.checks === "unknown" || detail.merge === "unknown";
-      if (!needsDeferred) {
-        return detail;
-      }
-      const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
-      if (!deferredUrl || !isSameOriginGitHubUrl(deferredUrl)) {
-        return detail;
-      }
-      try {
-        const response = await fetchImpl(deferredUrl, {
-          credentials: "include",
-          headers: {
-            Accept: "application/json,text/html"
+      if (needsDeferred) {
+        const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
+        if (deferredUrl && isSameOriginGitHubUrl(deferredUrl)) {
+          try {
+            const response = await fetchImpl(deferredUrl, {
+              credentials: "include",
+              headers: {
+                Accept: "application/json,text/html"
+              }
+            });
+            if (response.ok) {
+              const contentType = response.headers?.get?.("content-type") || "";
+              let deferredDetail = null;
+              if (contentType.includes("application/json")) {
+                deferredDetail = parsePrDetailPayload(await response.json());
+              } else {
+                const body = await response.text();
+                deferredDetail = parsePrDetailDocument(parser(body, deferredUrl));
+                if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
+                  deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
+                }
+              }
+              detail = mergeNativeDetails(detail, deferredDetail);
+            }
+          } catch {
           }
-        });
-        if (!response.ok) {
-          return detail;
         }
-        const contentType = response.headers?.get?.("content-type") || "";
-        let deferredDetail = null;
-        if (contentType.includes("application/json")) {
-          deferredDetail = parsePrDetailPayload(await response.json());
-        } else {
-          const body = await response.text();
-          deferredDetail = parsePrDetailDocument(parser(body));
-          if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
-            deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
-          }
-        }
-        return mergeNativeDetails(detail, deferredDetail);
-      } catch {
-        return detail;
       }
+      let unresolvedThreads = parseUnresolvedThreadCountDocument(prDocument);
+      if (!Number.isInteger(unresolvedThreads)) {
+        const filesUrl = `${summary.url}/files`;
+        try {
+          const filesHtml = await fetchHtml(fetchImpl, filesUrl);
+          unresolvedThreads = parseUnresolvedThreadCountDocument(parser(filesHtml, filesUrl));
+        } catch {
+        }
+      }
+      return mergeNativeDetails(detail, { unresolvedThreads });
+    }
+    async function removeOpenSummary(key) {
+      const latest = await storage.load();
+      latest.openListCache = {
+        updatedAt: now(),
+        items: (latest.openListCache.items || []).filter((summary) => summary.key !== key)
+      };
+      latest.detailCache = { ...latest.detailCache || {} };
+      delete latest.detailCache[key];
+      await storage.save(latest);
+      state.allSummaries = state.allSummaries.filter((summary) => summary.key !== key);
+      state.selectedKey = null;
+      state.prAction = { key: null, type: null, pending: false, error: "" };
+      state.filteredSummaries = computeFiltered();
+      render();
     }
     async function exportData() {
       await ui?.flushPending();
@@ -3083,7 +3581,50 @@ select {
             void ui?.flushPending(state.selectedKey);
           }
           state.selectedKey = key;
+          if (state.prAction.key !== key && !state.prAction.pending) {
+            state.prAction = { key: null, type: null, pending: false, error: "" };
+          }
           render();
+        },
+        async onMerge(key) {
+          const summary = state.allSummaries.find((item) => item.key === key);
+          if (!summary || summary.merge !== "clean" || summary.draft || state.prAction.pending) {
+            return;
+          }
+          const confirmed = win.confirm(
+            `Squash and merge ${summary.owner}/${summary.repo}#${summary.number}?
+
+GitHub's default commit title will be kept and the commit message body will be empty.`
+          );
+          if (!confirmed) {
+            return;
+          }
+          state.prAction = { key, type: "merge", pending: true, error: "" };
+          render();
+          try {
+            await ui?.flushPending(key);
+            await squashMergePullRequest({ fetchImpl, parser, summary });
+            await removeOpenSummary(key);
+          } catch (error) {
+            state.prAction = { key, type: "merge", pending: false, error: error.message };
+            render();
+          }
+        },
+        async onClosePullRequest(key, comment) {
+          const summary = state.allSummaries.find((item) => item.key === key);
+          if (!summary || state.prAction.pending) {
+            return;
+          }
+          state.prAction = { key, type: "close", pending: true, error: "" };
+          render();
+          try {
+            await ui?.flushPending(key);
+            await closePullRequest({ fetchImpl, parser, summary, comment });
+            await removeOpenSummary(key);
+          } catch (error) {
+            state.prAction = { key, type: "close", pending: false, error: error.message };
+            render();
+          }
         },
         async onRefresh() {
           await refresh(true);
@@ -3169,12 +3710,16 @@ select {
   }
   function mergeSummaryDetail(summary, detail) {
     const merged = mergeNativeDetails(detail, summary);
-    return {
+    const result = {
       review: merged.review,
       checks: merged.checks,
       merge: merged.merge,
       draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
     };
+    if (Number.isInteger(merged.unresolvedThreads)) {
+      result.unresolvedThreads = merged.unresolvedThreads;
+    }
+    return result;
   }
 
   // src/storage.js

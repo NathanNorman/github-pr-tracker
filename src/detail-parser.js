@@ -177,6 +177,38 @@ export function parsePrDetailDocument(doc) {
   return mergeNativeDetails(embedded, dom);
 }
 
+export function parseUnresolvedThreadCountDocument(doc) {
+  const candidates = [
+    ...doc.querySelectorAll(
+      ".js-resolvable-timeline-thread-container, .js-resolvable-thread, [data-review-thread-id], [data-pull-review-thread-id]"
+    )
+  ];
+  const threadRoots = candidates.filter(
+    (candidate) => !candidates.some((other) => other !== candidate && other.contains(candidate))
+  );
+
+  if (threadRoots.length) {
+    return threadRoots.filter((thread) => !isResolvedThread(thread)).length;
+  }
+
+  const conversationButtons = [...doc.querySelectorAll("button, input[type='submit']")]
+    .map((node) => (node.textContent || node.getAttribute("value") || "").trim())
+    .filter((label) => /^(?:un)?resolve (?:conversation|thread)$/i.test(label));
+  if (conversationButtons.length) {
+    return conversationButtons.filter((label) => /^resolve /i.test(label)).length;
+  }
+
+  if (
+    doc.querySelector(
+      ".js-diff-progressive-container, #files, [data-diff-anchor], [data-path][data-tagsearch-path], .js-file"
+    )
+  ) {
+    return 0;
+  }
+
+  return undefined;
+}
+
 export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
   const baseOrigin = new URL(baseUrl, GITHUB_ORIGIN).origin;
   const candidateAttributes = [
@@ -222,12 +254,34 @@ export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
 export function mergeNativeDetails(primary, fallback) {
   const left = primary || {};
   const right = fallback || {};
-  return {
+  const merged = {
     review: left.review && left.review !== "unknown" ? left.review : right.review || "unknown",
     checks: left.checks && left.checks !== "unknown" ? left.checks : right.checks || "unknown",
     merge: left.merge && left.merge !== "unknown" ? left.merge : right.merge || "unknown",
     draft: typeof left.draft === "boolean" ? left.draft : right.draft
   };
+  const unresolvedThreads = Number.isInteger(left.unresolvedThreads)
+    ? left.unresolvedThreads
+    : Number.isInteger(right.unresolvedThreads)
+      ? right.unresolvedThreads
+      : undefined;
+  if (Number.isInteger(unresolvedThreads) && unresolvedThreads >= 0) {
+    merged.unresolvedThreads = unresolvedThreads;
+  }
+  return merged;
+}
+
+function isResolvedThread(thread) {
+  if (
+    thread.matches('.is-resolved, [data-resolved="true" i], [data-is-resolved="true" i]') ||
+    thread.querySelector('.is-resolved, [data-resolved="true" i], [data-is-resolved="true" i]')
+  ) {
+    return true;
+  }
+  const controlsText = [...thread.querySelectorAll("button, input[type='submit']")]
+    .map((node) => node.textContent || node.getAttribute("value") || "")
+    .join(" ");
+  return /unresolve (?:conversation|thread)/i.test(controlsText);
 }
 
 function extractNestedPayloadDetail(root) {

@@ -78,6 +78,16 @@ function pullsHtml(items) {
     .join("")}</main></body></html>`;
 }
 
+async function waitFor(predicate, message = "condition") {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.fail(`Timed out waiting for ${message}.`);
+}
+
 test("handleRoute only auto-refreshes once per route entry", async () => {
   const dom = makeDom();
   const storage = makeStorage({ accountLogin: "octocat", records: {}, openListCache: { updatedAt: 1, items: [] }, detailCache: {} });
@@ -264,6 +274,17 @@ test("detail refresh invalidates older parser results, merges deferred fields, a
           text: async () => '<html><body><section data-test-selector="required-review-banner">Approved</section><div data-status-details-url="/acme/api/pull/1/status"></div></body></html>'
         };
       }
+      if (value.endsWith("/pull/1/files")) {
+        return {
+          ok: true,
+          text: async () => `
+            <div class="js-diff-progressive-container">
+              <div class="js-resolvable-timeline-thread-container"><button>Resolve conversation</button></div>
+              <div class="js-resolvable-timeline-thread-container"><button>Resolve conversation</button></div>
+              <div class="js-resolvable-timeline-thread-container is-resolved"><button>Unresolve conversation</button></div>
+            </div>`
+        };
+      }
       return {
         ok: true,
         json: async () => ({ checks_state: "SUCCESS", mergeStateStatus: "BLOCKED" }),
@@ -277,6 +298,7 @@ test("detail refresh invalidates older parser results, merges deferred fields, a
   assert.equal(summary.checks, "passing");
   assert.equal(summary.merge, "blocked");
   assert.equal(summary.draft, true);
+  assert.equal(summary.unresolvedThreads, 2);
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, DETAIL_PARSER_VERSION);
 });
 
@@ -512,6 +534,188 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
   const rowButton = shadow.querySelector(".pr-row-select");
   rowButton.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.equal(app.getState().selectedKey, "acme/api#1");
+});
+
+test("Escape and outside pointer presses dismiss disclosures and the PR panel", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const filterMenu = shadow.querySelector(".structured-filter-menu");
+  const filterSummary = shadow.querySelector(".filter-summary");
+  filterMenu.open = true;
+  filterSummary.focus();
+  filterSummary.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, composed: true }));
+  assert.equal(filterMenu.open, false);
+  assert.equal(shadow.activeElement, filterSummary);
+
+  shadow.querySelector(".pr-row-select").click();
+  assert.equal(app.getState().selectedKey, "acme/api#1");
+  shadow.querySelector(".drawer textarea").dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, composed: true })
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(app.getState().selectedKey, null);
+  assert.equal(shadow.querySelector(".drawer").hidden, true);
+
+  shadow.querySelector(".pr-row-select").click();
+  const sortMenu = shadow.querySelector(".sort-menu");
+  sortMenu.open = true;
+  dom.window.document.body.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true, composed: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(sortMenu.open, false);
+  assert.equal(app.getState().selectedKey, null);
+});
+
+test("each row surfaces its unresolved-thread count and a direct GitHub link", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: {
+      updatedAt: 1,
+      items: [{
+        key: "acme/api#1",
+        owner: "acme",
+        repo: "api",
+        number: 1,
+        title: "One",
+        url: "https://github.toasttab.com/acme/api/pull/1",
+        draft: false,
+        unresolvedThreads: 3
+      }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({ dom, storage, fetchImpl: async () => { throw new Error("offline"); } });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const openLink = shadow.querySelector(".row-open-link");
+  assert.equal(openLink.href, "https://github.toasttab.com/acme/api/pull/1");
+  assert.equal(openLink.target, "_blank");
+  assert.equal(openLink.rel, "noreferrer");
+  assert.equal(openLink.closest("button"), null);
+  assert.equal(shadow.querySelector(".thread-count").textContent, "3 unresolved threads");
+});
+
+test("merge action confirms, forces squash with an empty message body, and removes only the open-list item", async () => {
+  const dom = makeDom();
+  dom.window.confirm = () => true;
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: { "acme/api#1": { status: "next_up", blockedBy: "", notes: "keep", tags: [], modifiedAt: 1 } },
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+    },
+    detailCache: {}
+  });
+  let actionPhase = false;
+  const calls = [];
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url, options = {}) => {
+      if (!actionPhase) {
+        throw new Error("offline");
+      }
+      calls.push({ url: String(url), options });
+      if (options.method === "POST") {
+        return { ok: true, status: 200, text: async () => '<span class="State State--merged">Merged</span>' };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => `
+          <form action="/acme/api/pull/1/merge" method="post">
+            <input type="hidden" name="authenticity_token" value="csrf">
+            <input type="hidden" name="head_sha" value="abc123">
+            <input name="commit_title" value="One (#1)">
+            <textarea name="commit_message">generated body</textarea>
+            <input type="hidden" name="do" value="squash">
+          </form>`
+      };
+    }
+  });
+  await app.init();
+  actionPhase = true;
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  shadow.querySelector(".merge-action").click();
+  await waitFor(() => app.getState().allSummaries.length === 0, "merge completion");
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].options.body, /commit_message=&do=squash/);
+  assert.equal(storage.getEnvelope().openListCache.items.length, 0);
+  assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "keep");
+});
+
+test("close action accepts an optional comment and removes the closed PR", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "blocked" }]
+    },
+    detailCache: {}
+  });
+  let actionPhase = false;
+  const calls = [];
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url, options = {}) => {
+      if (!actionPhase) {
+        throw new Error("offline");
+      }
+      calls.push({ url: String(url), options });
+      if (options.method === "POST") {
+        return { ok: true, status: 200, text: async () => '<span class="State State--closed">Closed</span>' };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => `
+          <form action="/acme/api/pull/1/comment?sticky=true" method="post">
+            <input type="hidden" name="authenticity_token" value="csrf">
+            <textarea name="comment[body]"></textarea>
+            <button name="comment_and_close" value="1">Close with comment</button>
+          </form>`
+      };
+    }
+  });
+  await app.init();
+  actionPhase = true;
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  assert.equal(shadow.querySelector(".merge-action"), null);
+  shadow.querySelector(".close-action").click();
+  const comment = shadow.querySelector(".close-comment");
+  comment.value = "Superseded by #2";
+  comment.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  shadow.querySelector(".close-confirm").click();
+  await waitFor(() => app.getState().allSummaries.length === 0, "close completion");
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].options.body, /comment%5Bbody%5D=Superseded\+by\+%232/);
+  assert.match(calls[1].options.body, /comment_and_close=1/);
 });
 
 test("personal status can be changed directly from a PR row", async () => {

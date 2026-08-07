@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ensureTrackerNav, fetchOpenPrs, isSameOriginGitHubUrl, isTrackerRoute, parsePullListDocument, trackerSearchUrl, trackerUrl } from "../src/github.js";
-import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "../src/detail-parser.js";
+import {
+  findDeferredStatusEndpoint,
+  mergeNativeDetails,
+  parsePrDetailDocument,
+  parsePrDetailPayload,
+  parseUnresolvedThreadCountDocument
+} from "../src/detail-parser.js";
 import { parsePrUrl } from "../src/models.js";
 import { parseHtml } from "./helpers.js";
 
@@ -176,6 +182,31 @@ test("detail parser reads current GitHub reviewer approval text", () => {
     </div>
   `);
   assert.equal(parsePrDetailDocument(doc).review, "approved");
+});
+
+test("thread parser counts only unresolved review conversations", () => {
+  const doc = parseHtml(`
+    <div class="js-diff-progressive-container">
+      <div class="js-resolvable-timeline-thread-container" data-review-thread-id="one">
+        <button>Resolve conversation</button>
+      </div>
+      <div class="js-resolvable-timeline-thread-container is-resolved" data-review-thread-id="two">
+        <button>Unresolve conversation</button>
+      </div>
+      <div class="js-resolvable-timeline-thread-container" data-review-thread-id="three">
+        <div class="js-resolvable-thread"><button>Resolve conversation</button></div>
+      </div>
+    </div>
+  `);
+  assert.equal(parseUnresolvedThreadCountDocument(doc), 2);
+});
+
+test("thread parser reports zero for a loaded files view and unknown for unrelated HTML", () => {
+  assert.equal(
+    parseUnresolvedThreadCountDocument(parseHtml('<div class="js-diff-progressive-container"></div>')),
+    0
+  );
+  assert.equal(parseUnresolvedThreadCountDocument(parseHtml("<main>Conversation</main>")), undefined);
 });
 
 test("parsePrDetailPayload maps uppercase current-state values", () => {

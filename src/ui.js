@@ -166,6 +166,64 @@ export function createUi(container, handlers) {
   let focusedBeforeDrawer = null;
   let currentState = null;
   let currentSelectedKey = null;
+  let closePromptKey = null;
+  let closeComment = "";
+  const disclosureMenus = [backupMenu, filterMenu, sortMenu];
+
+  function dismissDisclosures(path = []) {
+    for (const menu of disclosureMenus) {
+      if (menu.open && !path.includes(menu)) {
+        menu.open = false;
+      }
+    }
+  }
+
+  async function dismissDrawer({ restoreFocus = false } = {}) {
+    const key = currentState?.selectedKey;
+    if (!key) {
+      return;
+    }
+    await flushPending(key);
+    handlers.onSelect(null);
+    if (restoreFocus && focusedBeforeDrawer instanceof HTMLElement) {
+      focusedBeforeDrawer.focus();
+    }
+  }
+
+  function eventPath(event) {
+    return typeof event.composedPath === "function" ? event.composedPath() : [event.target];
+  }
+
+  function onDocumentPointerDown(event) {
+    const path = eventPath(event);
+    dismissDisclosures(path);
+    const clickedPrRow = path.some((node) => node instanceof HTMLElement && node.classList.contains("pr-row"));
+    if (currentState?.selectedKey && !path.includes(drawer) && !clickedPrRow) {
+      void dismissDrawer();
+    }
+  }
+
+  function onDocumentKeyDown(event) {
+    if (event.key !== "Escape") {
+      return;
+    }
+    const openMenus = disclosureMenus.filter((menu) => menu.open);
+    if (openMenus.length) {
+      for (const menu of openMenus) {
+        menu.open = false;
+      }
+      openMenus.at(-1)?.querySelector("summary")?.focus();
+      event.preventDefault();
+      return;
+    }
+    if (currentState?.selectedKey) {
+      event.preventDefault();
+      void dismissDrawer({ restoreFocus: true });
+    }
+  }
+
+  doc.addEventListener("pointerdown", onDocumentPointerDown, true);
+  doc.addEventListener("keydown", onDocumentKeyDown, true);
 
   function render(state) {
     const focusSnapshot = captureFocus();
@@ -333,13 +391,13 @@ export function createUi(container, handlers) {
       rowButton.setAttribute("aria-label", `Edit personal tracking for ${summary.title}`);
       rowButton.addEventListener("click", () => {
         focusedBeforeDrawer = shadow.activeElement;
-        handlers.onSelect(summary.key);
+        handlers.onSelect(currentState?.selectedKey === summary.key ? null : summary.key);
       });
       rowButton.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           focusedBeforeDrawer = shadow.activeElement;
-          handlers.onSelect(summary.key);
+          handlers.onSelect(currentState?.selectedKey === summary.key ? null : summary.key);
         }
       });
 
@@ -364,6 +422,12 @@ export function createUi(container, handlers) {
       appendKnownBadge(details, "Review", summary.review);
       appendKnownBadge(details, "Checks", summary.checks);
       appendKnownBadge(details, "Merge", summary.merge);
+      if (Number.isInteger(summary.unresolvedThreads)) {
+        const threads = doc.createElement("span");
+        threads.className = "thread-count";
+        threads.textContent = `${summary.unresolvedThreads} unresolved ${summary.unresolvedThreads === 1 ? "thread" : "threads"}`;
+        details.append(threads);
+      }
       if (summary.draft) {
         const draftBadge = makeBadge("Draft", "draft");
         draftBadge.textContent = "Draft";
@@ -402,7 +466,18 @@ export function createUi(container, handlers) {
       statusSelect.addEventListener("change", () => handlers.onQuickStatus(summary.key, statusSelect.value));
       quickStatus.append(quickLabel, statusSelect);
 
-      row.append(rowButton, quickStatus);
+      const rowControls = doc.createElement("div");
+      rowControls.className = "row-controls";
+      const openLink = doc.createElement("a");
+      openLink.className = "row-open-link";
+      openLink.href = summary.url;
+      openLink.target = "_blank";
+      openLink.rel = "noreferrer";
+      openLink.textContent = "Open ↗";
+      openLink.setAttribute("aria-label", `Open ${summary.title} on GitHub`);
+      rowControls.append(openLink, quickStatus);
+
+      row.append(rowButton, rowControls);
 
       if (record.tags.length) {
         const tags = doc.createElement("div");
@@ -431,8 +506,15 @@ export function createUi(container, handlers) {
     if (!state.selectedKey) {
       void flushPending(currentSelectedKey);
       currentSelectedKey = null;
+      closePromptKey = null;
+      closeComment = "";
       drawer.textContent = "";
       return;
+    }
+
+    if (closePromptKey && closePromptKey !== state.selectedKey) {
+      closePromptKey = null;
+      closeComment = "";
     }
 
     const summary =
@@ -457,13 +539,7 @@ export function createUi(container, handlers) {
     close.className = "icon-btn";
     close.textContent = "×";
     close.setAttribute("aria-label", "Close personal tracking panel");
-    close.addEventListener("click", async () => {
-      await flushPending(state.selectedKey);
-      handlers.onSelect(null);
-      if (focusedBeforeDrawer instanceof HTMLElement) {
-        focusedBeforeDrawer.focus();
-      }
-    });
+    close.addEventListener("click", () => void dismissDrawer({ restoreFocus: true }));
     header.append(headerText, close);
 
     const identity = doc.createElement("div");
@@ -475,6 +551,81 @@ export function createUi(container, handlers) {
     identityRepo.className = "repo";
     identityRepo.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
     identity.append(identityTitle, identityRepo);
+
+    const prActions = doc.createElement("section");
+    prActions.className = "pr-actions";
+    const prActionsLabel = doc.createElement("div");
+    prActionsLabel.className = "field-label";
+    prActionsLabel.textContent = "GitHub actions";
+    const prActionButtons = doc.createElement("div");
+    prActionButtons.className = "pr-action-buttons";
+    const actionPending = state.prAction?.pending && state.prAction.key === state.selectedKey;
+
+    if (summary?.merge === "clean" && !summary.draft) {
+      const mergeButton = makeActionButton(
+        actionPending && state.prAction.type === "merge" ? "Merging…" : "Squash & merge",
+        () => void handlers.onMerge(state.selectedKey),
+        "action-btn merge-action"
+      );
+      mergeButton.disabled = actionPending;
+      prActionButtons.append(mergeButton);
+    }
+
+    const closePrButton = makeActionButton(
+      actionPending && state.prAction.type === "close" ? "Closing…" : "Close PR",
+      () => {
+        closePromptKey = state.selectedKey;
+        closeComment = "";
+        renderDrawer(currentState);
+        drawer.querySelector(".close-comment")?.focus();
+      },
+      "action-btn close-action"
+    );
+    closePrButton.disabled = actionPending;
+    prActionButtons.append(closePrButton);
+    prActions.append(prActionsLabel, prActionButtons);
+
+    if (closePromptKey === state.selectedKey) {
+      const closePrompt = doc.createElement("div");
+      closePrompt.className = "close-prompt";
+      const closePromptLabel = doc.createElement("label");
+      closePromptLabel.className = "field-label";
+      closePromptLabel.textContent = "Optional closing comment";
+      const closeCommentInput = doc.createElement("textarea");
+      closeCommentInput.className = "close-comment";
+      closeCommentInput.rows = 3;
+      closeCommentInput.placeholder = "Add context before closing…";
+      closeCommentInput.value = closeComment;
+      closeCommentInput.addEventListener("input", () => {
+        closeComment = closeCommentInput.value;
+      });
+      closePromptLabel.append(closeCommentInput);
+      const closePromptButtons = doc.createElement("div");
+      closePromptButtons.className = "close-prompt-buttons";
+      const cancelClose = makeActionButton("Cancel", () => {
+        closePromptKey = null;
+        closeComment = "";
+        renderDrawer(currentState);
+      }, "action-btn");
+      const confirmClose = makeActionButton(
+        actionPending ? "Closing…" : "Close pull request",
+        () => void handlers.onClosePullRequest(state.selectedKey, closeComment),
+        "action-btn close-confirm"
+      );
+      cancelClose.disabled = actionPending;
+      confirmClose.disabled = actionPending;
+      closePromptButtons.append(cancelClose, confirmClose);
+      closePrompt.append(closePromptLabel, closePromptButtons);
+      prActions.append(closePrompt);
+    }
+
+    if (state.prAction?.key === state.selectedKey && state.prAction.error) {
+      const actionError = doc.createElement("div");
+      actionError.className = "pr-action-error";
+      actionError.setAttribute("role", "alert");
+      actionError.textContent = state.prAction.error;
+      prActions.append(actionError);
+    }
 
     const statusField = makeField("My status");
     const statusSelect = makeStatusSelect(record.status);
@@ -564,7 +715,7 @@ export function createUi(container, handlers) {
     saveState.textContent = state.saveState;
     footer.append(saveState, link);
 
-    drawer.append(header, identity, statusField, blockerField, tagsField, notesField, footer);
+    drawer.append(header, identity, prActions, statusField, blockerField, tagsField, notesField, footer);
   }
 
   function makeStatusSelect(selectedStatus) {
@@ -840,7 +991,13 @@ export function createUi(container, handlers) {
     void handlers.onFilterChange({ checks: checksSelect.value });
   });
 
-  return { render, shadow, flushPending, setSaveState };
+  function dismiss() {
+    dismissDisclosures();
+    closePromptKey = null;
+    closeComment = "";
+  }
+
+  return { render, shadow, flushPending, setSaveState, dismiss };
 }
 
 function countStatuses(state) {

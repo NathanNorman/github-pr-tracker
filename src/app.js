@@ -1,6 +1,13 @@
 import { DETAIL_CACHE_TTL_MS, DETAIL_PARSER_VERSION, DEFAULT_RECORD } from "./constants.js";
-import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "./detail-parser.js";
+import {
+  findDeferredStatusEndpoint,
+  mergeNativeDetails,
+  parsePrDetailDocument,
+  parsePrDetailPayload,
+  parseUnresolvedThreadCountDocument
+} from "./detail-parser.js";
 import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl, trackerSearchUrl } from "./github.js";
+import { closePullRequest, squashMergePullRequest } from "./github-actions.js";
 import {
   DEFAULT_FILTER_PREFERENCES,
   filterSummaries,
@@ -28,6 +35,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     filterPreferences: DEFAULT_FILTER_PREFERENCES,
     sortPreferences: null,
     selectedKey: null,
+    prAction: { key: null, type: null, pending: false, error: "" },
     showCompleted: false,
     refreshing: false,
     warning: "",
@@ -195,6 +203,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
 
   function unmount() {
     void ui?.flushPending();
+    ui?.dismiss?.();
     if (host) {
       host.remove();
     }
@@ -297,41 +306,63 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       detail.review === "unknown" ||
       detail.checks === "unknown" ||
       detail.merge === "unknown";
-    if (!needsDeferred) {
-      return detail;
-    }
-
-    const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
-    if (!deferredUrl || !isSameOriginGitHubUrl(deferredUrl)) {
-      return detail;
-    }
-
-    try {
-      const response = await fetchImpl(deferredUrl, {
-        credentials: "include",
-        headers: {
-          Accept: "application/json,text/html"
-        }
-      });
-      if (!response.ok) {
-        return detail;
-      }
-
-      const contentType = response.headers?.get?.("content-type") || "";
-      let deferredDetail = null;
-      if (contentType.includes("application/json")) {
-        deferredDetail = parsePrDetailPayload(await response.json());
-      } else {
-        const body = await response.text();
-        deferredDetail = parsePrDetailDocument(parser(body));
-        if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
-          deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
+    if (needsDeferred) {
+      const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
+      if (deferredUrl && isSameOriginGitHubUrl(deferredUrl)) {
+        try {
+          const response = await fetchImpl(deferredUrl, {
+            credentials: "include",
+            headers: {
+              Accept: "application/json,text/html"
+            }
+          });
+          if (response.ok) {
+            const contentType = response.headers?.get?.("content-type") || "";
+            let deferredDetail = null;
+            if (contentType.includes("application/json")) {
+              deferredDetail = parsePrDetailPayload(await response.json());
+            } else {
+              const body = await response.text();
+              deferredDetail = parsePrDetailDocument(parser(body, deferredUrl));
+              if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
+                deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
+              }
+            }
+            detail = mergeNativeDetails(detail, deferredDetail);
+          }
+        } catch {
+          // Keep the best detail already parsed from the pull request page.
         }
       }
-      return mergeNativeDetails(detail, deferredDetail);
-    } catch {
-      return detail;
     }
+
+    let unresolvedThreads = parseUnresolvedThreadCountDocument(prDocument);
+    if (!Number.isInteger(unresolvedThreads)) {
+      const filesUrl = `${summary.url}/files`;
+      try {
+        const filesHtml = await fetchHtml(fetchImpl, filesUrl);
+        unresolvedThreads = parseUnresolvedThreadCountDocument(parser(filesHtml, filesUrl));
+      } catch {
+        // Thread counts are best-effort and must not hide the rest of a PR.
+      }
+    }
+    return mergeNativeDetails(detail, { unresolvedThreads });
+  }
+
+  async function removeOpenSummary(key) {
+    const latest = await storage.load();
+    latest.openListCache = {
+      updatedAt: now(),
+      items: (latest.openListCache.items || []).filter((summary) => summary.key !== key)
+    };
+    latest.detailCache = { ...(latest.detailCache || {}) };
+    delete latest.detailCache[key];
+    await storage.save(latest);
+    state.allSummaries = state.allSummaries.filter((summary) => summary.key !== key);
+    state.selectedKey = null;
+    state.prAction = { key: null, type: null, pending: false, error: "" };
+    state.filteredSummaries = computeFiltered();
+    render();
   }
 
   async function exportData() {
@@ -445,7 +476,48 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
           void ui?.flushPending(state.selectedKey);
         }
         state.selectedKey = key;
+        if (state.prAction.key !== key && !state.prAction.pending) {
+          state.prAction = { key: null, type: null, pending: false, error: "" };
+        }
         render();
+      },
+      async onMerge(key) {
+        const summary = state.allSummaries.find((item) => item.key === key);
+        if (!summary || summary.merge !== "clean" || summary.draft || state.prAction.pending) {
+          return;
+        }
+        const confirmed = win.confirm(
+          `Squash and merge ${summary.owner}/${summary.repo}#${summary.number}?\n\nGitHub's default commit title will be kept and the commit message body will be empty.`
+        );
+        if (!confirmed) {
+          return;
+        }
+        state.prAction = { key, type: "merge", pending: true, error: "" };
+        render();
+        try {
+          await ui?.flushPending(key);
+          await squashMergePullRequest({ fetchImpl, parser, summary });
+          await removeOpenSummary(key);
+        } catch (error) {
+          state.prAction = { key, type: "merge", pending: false, error: error.message };
+          render();
+        }
+      },
+      async onClosePullRequest(key, comment) {
+        const summary = state.allSummaries.find((item) => item.key === key);
+        if (!summary || state.prAction.pending) {
+          return;
+        }
+        state.prAction = { key, type: "close", pending: true, error: "" };
+        render();
+        try {
+          await ui?.flushPending(key);
+          await closePullRequest({ fetchImpl, parser, summary, comment });
+          await removeOpenSummary(key);
+        } catch (error) {
+          state.prAction = { key, type: "close", pending: false, error: error.message };
+          render();
+        }
       },
       async onRefresh() {
         await refresh(true);
@@ -535,10 +607,14 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
 
 function mergeSummaryDetail(summary, detail) {
   const merged = mergeNativeDetails(detail, summary);
-  return {
+  const result = {
     review: merged.review,
     checks: merged.checks,
     merge: merged.merge,
     draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
   };
+  if (Number.isInteger(merged.unresolvedThreads)) {
+    result.unresolvedThreads = merged.unresolvedThreads;
+  }
+  return result;
 }
