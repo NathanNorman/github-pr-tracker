@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.6.0
+// @version      1.6.1
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.6.0
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.6.1
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -21,7 +21,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 4;
+  var DETAIL_PARSER_VERSION = 5;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -212,11 +212,85 @@
     }
     return null;
   }
+  function classifyCheckSignal(text) {
+    const normalized = String(text || "");
+    if (/color-fg-danger|octicon-x|failing|failed|checks? not successful|checks? have failed/i.test(normalized)) {
+      return "failing";
+    }
+    if (/hx_dot-fill-pending-icon|color-fg-attention|pending|expected|running|in progress|checks? (?:are|is) still/i.test(normalized)) {
+      return "pending";
+    }
+    if (/color-fg-success|octicon-check|successful|passed|all checks have passed/i.test(normalized)) {
+      return "passing";
+    }
+    if (/no checks/i.test(normalized)) {
+      return "none";
+    }
+    const totals = normalized.match(/(\d+)\s*\/\s*(\d+)\s*checks? OK/i);
+    if (totals && totals[1] === totals[2]) {
+      return "passing";
+    }
+    return "unknown";
+  }
+  function checkSignalText(root) {
+    if (!root) {
+      return "";
+    }
+    const heading = root.querySelector?.(".status-heading");
+    if (heading && /\bchecks?\b/i.test(heading.textContent || "")) {
+      const meta = heading.parentElement?.querySelector?.(".status-meta");
+      return [heading.className, heading.textContent, meta?.className, meta?.textContent].filter(Boolean).join(" ");
+    }
+    const nodes = [
+      root,
+      ...root.querySelectorAll(
+        'summary, .status-heading, .status-meta, [aria-label*="check" i], img[alt*="check" i], [data-checks-state]'
+      )
+    ];
+    return nodes.map((node) => [
+      node.className,
+      node.getAttribute?.("aria-label"),
+      node.getAttribute?.("alt"),
+      node.getAttribute?.("data-checks-state"),
+      node.textContent
+    ].filter(Boolean).join(" ")).join(" ");
+  }
+  function findCurrentCheckRoot(doc) {
+    const mergeabilityRoot = doc.querySelector('.mergeability-details, [data-test-selector="mergebox"]');
+    if (mergeabilityRoot) {
+      const actionItems = [...mergeabilityRoot.querySelectorAll(".branch-action-item")];
+      const currentRollup = actionItems.find((item) => {
+        const heading = item.querySelector(".status-heading")?.textContent || "";
+        const meta = item.querySelector(".status-meta")?.textContent || "";
+        return /\bchecks?\b/i.test(`${heading} ${meta}`);
+      });
+      if (currentRollup) {
+        return currentRollup;
+      }
+      const nestedRollup = mergeabilityRoot.querySelector(".commit-build-statuses, [data-checks-state]");
+      if (nestedRollup) {
+        return nestedRollup;
+      }
+      return null;
+    }
+    const explicitRollups = [...doc.querySelectorAll("[data-checks-state]")];
+    if (explicitRollups.length) {
+      return explicitRollups.at(-1);
+    }
+    const commitRollups = [...doc.querySelectorAll(".commit-build-statuses")];
+    if (commitRollups.length) {
+      return commitRollups.at(-1);
+    }
+    const labelledRollups = [...doc.querySelectorAll('[aria-label*="checks" i], img[alt*="checks" i]')];
+    return labelledRollups.at(-1) || null;
+  }
   function detailFromDom(doc) {
     let review = "unknown";
     let checks = "unknown";
     let merge = "unknown";
-    const currentReviewRoot = doc.querySelector('[data-url*="pull_requests%2Fsidebar%2Fshow%2Freviewers"]') || doc.querySelector('form[id^="pull-request-reviewers-form-"]') || doc.querySelector('[data-test-selector="required-review-banner"], [data-review-state]');
+    const mergeabilityRoot = doc.querySelector('.mergeability-details, [data-test-selector="mergebox"]');
+    const mergeabilityReviewRoot = [...mergeabilityRoot?.querySelectorAll(".branch-action-item") || []].find((item) => /\breview(?:ers?)?\b/i.test(item.querySelector(".status-heading")?.textContent || ""));
+    const currentReviewRoot = mergeabilityReviewRoot || doc.querySelector('[data-url*="pull_requests%2Fsidebar%2Fshow%2Freviewers"]') || doc.querySelector('form[id^="pull-request-reviewers-form-"]') || doc.querySelector('[data-test-selector="required-review-banner"], [data-review-state]');
     const reviewText = currentReviewRoot ? [
       currentReviewRoot.textContent,
       ...[...currentReviewRoot.querySelectorAll("tool-tip, [aria-label]")].map(
@@ -227,35 +301,13 @@
       review = "changes_requested";
     } else if (/approved(?: these changes)?/i.test(reviewText)) {
       review = "approved";
-    } else if (/review required|required review|review requested/i.test(reviewText)) {
+    } else if (/review required|required review|review requested|requested review|approving review is required/i.test(reviewText)) {
       review = "required";
     } else if (/no reviews/i.test(reviewText)) {
       review = "none";
     }
-    const checkNodes = [
-      ...doc.querySelectorAll(
-        '.commit-build-statuses summary, [data-deferred-details-content-url*="/status-details"], [aria-label*="checks" i], [data-checks-state]'
-      )
-    ];
-    const checksText = checkNodes.map((node) => {
-      const labelled = [node, ...node.querySelectorAll("[aria-label]")];
-      return [
-        node.className,
-        node.getAttribute("data-checks-state"),
-        node.textContent,
-        ...labelled.map((item) => item.getAttribute("aria-label"))
-      ].filter(Boolean).join(" ");
-    }).join(" ");
-    if (/color-fg-danger|octicon-x|failing|failed|checks? not successful/i.test(checksText)) {
-      checks = "failing";
-    } else if (/hx_dot-fill-pending-icon|pending|expected|running|in progress/i.test(checksText)) {
-      checks = "pending";
-    } else if (/color-fg-success|successful|passed|all checks have passed|\d+\s*\/\s*\d+ checks OK/i.test(checksText)) {
-      checks = "passing";
-    } else if (/no checks/i.test(checksText)) {
-      checks = "none";
-    }
-    const mergeText = doc.querySelector('[data-mergeability-message], [data-test-selector="mergebox"], [aria-label*="merge"]')?.textContent || "";
+    checks = classifyCheckSignal(checkSignalText(findCurrentCheckRoot(doc)));
+    const mergeText = doc.querySelector('.mergeability-details, [data-mergeability-message], [data-test-selector="mergebox"], [aria-label*="merge"]')?.textContent || "";
     if (/\bconflicts?\b/i.test(mergeText) && !/\bno conflicts?\b/i.test(mergeText)) {
       merge = "conflicting";
     } else if (/cannot be merged|blocked|merge is blocked/i.test(mergeText)) {
@@ -1060,12 +1112,15 @@
       review = "approved";
     }
     const checkRoots = [...row.querySelectorAll(
-      '[aria-label*="check" i], img[alt*="check" i], [data-checks-state], .commit-build-statuses, [class*="status-check" i], [class*="check-status" i]'
+      '[data-checks-state], .commit-build-statuses, [aria-label*="check" i], img[alt*="check" i], [class~="status-check" i], [class~="check-status" i]'
     )];
-    const checkNodes = [...new Set(checkRoots.flatMap((node) => [
-      node,
-      ...node.querySelectorAll("[aria-label], img[alt], [data-checks-state], [class]")
-    ]))];
+    const checkRoot = checkRoots.at(-1);
+    const checkNodes = checkRoot ? [
+      checkRoot,
+      ...checkRoot.querySelectorAll(
+        'summary, [aria-label*="check" i], img[alt*="check" i], [data-checks-state]'
+      )
+    ] : [];
     const checkText = checkNodes.map((node) => [
       node.getAttribute("aria-label"),
       node.getAttribute("alt"),
@@ -1802,13 +1857,25 @@ select {
   font-size: 13px;
 }
 .row-details {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+.row-metadata {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
   align-items: center;
-  margin-top: 7px;
-  color: var(--fgColor-muted, #59636e);
-  font-size: 12px;
+}
+.row-status-lines {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.native-status-line {
+  display: block;
 }
 .thread-count::before {
   content: "";
@@ -2231,6 +2298,18 @@ select {
     none: "No checks",
     unknown: "Checks unavailable"
   };
+  var REVIEW_ROW_LABELS = {
+    approved: "Review approved",
+    changes_requested: "Changes requested",
+    required: "Review needed",
+    none: "No review needed"
+  };
+  var CHECK_ROW_LABELS = {
+    passing: "Checks passing",
+    failing: "Checks failing",
+    pending: "Checks pending",
+    none: "No checks"
+  };
   function createUi(container, handlers) {
     const doc = container.ownerDocument;
     const shadow = container.shadowRoot || container.attachShadow({ mode: "open" });
@@ -2527,6 +2606,7 @@ select {
         list.append(empty);
         return;
       }
+      let renderedRowIndex = 0;
       for (const group of state.summaryGroups) {
         const groupSection = doc.createElement("section");
         groupSection.className = "pr-group";
@@ -2576,24 +2656,37 @@ select {
           title.textContent = summary.title;
           const details = doc.createElement("span");
           details.className = "row-details";
+          details.id = `pr-row-details-${renderedRowIndex}`;
+          renderedRowIndex += 1;
+          rowButton.setAttribute("aria-describedby", details.id);
+          const metadata = doc.createElement("span");
+          metadata.className = "row-metadata";
           if (summary.updatedAt) {
             const updated = doc.createElement("span");
             updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
-            details.append(updated);
+            metadata.append(updated);
           }
-          appendKnownBadge(details, "Review", summary.review);
-          appendKnownBadge(details, "Checks", summary.checks);
-          appendKnownBadge(details, "Merge", summary.merge);
+          appendKnownBadge(metadata, "Merge", summary.merge, "merge");
           if (Number.isInteger(summary.unresolvedThreads)) {
             const threads = doc.createElement("span");
             threads.className = "thread-count";
             threads.textContent = `${summary.unresolvedThreads} unresolved ${summary.unresolvedThreads === 1 ? "thread" : "threads"}`;
-            details.append(threads);
+            metadata.append(threads);
           }
           if (summary.draft) {
             const draftBadge = makeBadge("Draft", "draft");
             draftBadge.textContent = "Draft";
-            details.append(draftBadge);
+            metadata.append(draftBadge);
+          }
+          if (metadata.childElementCount) {
+            details.append(metadata);
+          }
+          const statusLines = doc.createElement("span");
+          statusLines.className = "row-status-lines";
+          appendNativeStatus(statusLines, "review", summary.review, REVIEW_ROW_LABELS);
+          appendNativeStatus(statusLines, "checks", summary.checks, CHECK_ROW_LABELS);
+          if (statusLines.childElementCount) {
+            details.append(statusLines);
           }
           if (record.status === "blocked" && record.blockedBy) {
             const blocker = doc.createElement("span");
@@ -2982,16 +3075,25 @@ select {
         next.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd ?? snapshot.selectionStart);
       }
     }
-    function makeBadge(label, value) {
+    function makeBadge(label, value, kind = label.toLowerCase()) {
       const badge = doc.createElement("span");
       badge.className = "badge";
       badge.dataset.state = value;
+      badge.dataset.kind = kind;
       badge.textContent = `${label}: ${String(value).replaceAll("_", " ")}`;
       return badge;
     }
-    function appendKnownBadge(target, label, value) {
+    function appendKnownBadge(target, label, value, kind = label.toLowerCase()) {
       if (value && value !== "unknown") {
-        target.append(makeBadge(label, value));
+        target.append(makeBadge(label, value, kind));
+      }
+    }
+    function appendNativeStatus(target, kind, value, labels) {
+      if (value && value !== "unknown") {
+        const badge = makeBadge(kind, value, kind);
+        badge.classList.add("native-status-line");
+        badge.textContent = labels[value] || `${kind}: ${String(value).replaceAll("_", " ")}`;
+        target.append(badge);
       }
     }
     function makeTagButton(tag, { onClick, ariaLabel }) {

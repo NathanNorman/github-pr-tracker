@@ -1,15 +1,25 @@
 <!doctype html>
 <html>
   <body>
+    <details class="commit-build-statuses">
+      <summary class="color-fg-danger">
+        <svg class="octicon octicon-x" aria-label="6 / 7 checks OK"></svg>
+      </summary>
+    </details>
     <div data-test-selector="required-review-banner" class="color-fg-danger">
       Code owner review required
     </div>
-    <details class="commit-build-statuses">
-      <summary class="color-fg-success">
-        All checks have passed
-        <svg aria-label="7 / 7 checks OK"></svg>
-      </summary>
-    </details>
-    <div data-mergeability-message class="color-fg-danger">Merging is blocked</div>
+    <div class="mergeability-details">
+      <div class="branch-action-item">
+        <h3 class="status-heading color-fg-danger">Code owner review required</h3>
+      </div>
+      <div class="branch-action-item">
+        <h3 class="status-heading">All checks have passed</h3>
+        <span class="status-meta">7 successful checks</span>
+      </div>
+      <div class="branch-action-item">
+        <h3 class="status-heading color-fg-danger">Merging is blocked</h3>
+      </div>
+    </div>
   </body>
 </html>

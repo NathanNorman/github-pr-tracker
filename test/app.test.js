@@ -536,6 +536,55 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
   assert.equal(app.getState().selectedKey, "acme/api#1");
 });
 
+test("review and check states render independently on separate status lines", async () => {
+  const dom = makeDom();
+  const cachedAt = Date.now();
+  const items = [
+    { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Approved with failing checks", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
+    { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Review needed with passing checks", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
+  ];
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: { updatedAt: cachedAt, items },
+    detailCache: {
+      "acme/api#1": { updatedAt: cachedAt, parserVersion: DETAIL_PARSER_VERSION, detail: { review: "approved", checks: "failing", merge: "blocked", draft: false } },
+      "acme/api#2": { updatedAt: cachedAt, parserVersion: DETAIL_PARSER_VERSION, detail: { review: "required", checks: "passing", merge: "blocked", draft: false } }
+    }
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () => String(url).includes("/pulls")
+        ? pullsHtml(items.map((item) => ({ href: `/acme/api/pull/${item.number}`, title: item.title, draft: false })))
+        : "<html><body></body></html>",
+      headers: { get: () => "text/html" }
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const approvedRow = shadow.querySelector('[data-pr-key="acme/api#1"]');
+  const neededRow = shadow.querySelector('[data-pr-key="acme/api#2"]');
+
+  assert.equal(approvedRow.querySelector('[data-kind="review"]').textContent, "Review approved");
+  assert.equal(approvedRow.querySelector('[data-kind="review"]').dataset.state, "approved");
+  assert.equal(approvedRow.querySelector('[data-kind="checks"]').textContent, "Checks failing");
+  assert.equal(approvedRow.querySelector('[data-kind="checks"]').dataset.state, "failing");
+  assert.equal(neededRow.querySelector('[data-kind="review"]').textContent, "Review needed");
+  assert.equal(neededRow.querySelector('[data-kind="review"]').dataset.state, "required");
+  assert.equal(neededRow.querySelector('[data-kind="checks"]').textContent, "Checks passing");
+  assert.equal(neededRow.querySelector('[data-kind="checks"]').dataset.state, "passing");
+  assert.deepEqual(
+    [...neededRow.querySelector(".row-status-lines").children].map((node) => node.dataset.kind),
+    ["review", "checks"]
+  );
+  const rowButton = neededRow.querySelector(".pr-row-select");
+  assert.equal(rowButton.getAttribute("aria-describedby"), neededRow.querySelector(".row-details").id);
+  assert.match(neededRow.querySelector(".row-details").textContent, /Review needed.*Checks passing/s);
+});
+
 test("Escape and outside pointer presses dismiss disclosures and the PR panel", async () => {
   const dom = makeDom();
   const storage = makeStorage({

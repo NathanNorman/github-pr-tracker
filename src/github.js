@@ -228,12 +228,17 @@ function parsePullListDetail(row) {
   }
 
   const checkRoots = [...row.querySelectorAll(
-    '[aria-label*="check" i], img[alt*="check" i], [data-checks-state], .commit-build-statuses, [class*="status-check" i], [class*="check-status" i]'
+    '[data-checks-state], .commit-build-statuses, [aria-label*="check" i], img[alt*="check" i], [class~="status-check" i], [class~="check-status" i]'
   )];
-  const checkNodes = [...new Set(checkRoots.flatMap((node) => [
-    node,
-    ...node.querySelectorAll('[aria-label], img[alt], [data-checks-state], [class]')
-  ]))];
+  const checkRoot = checkRoots.at(-1);
+  const checkNodes = checkRoot
+    ? [
+        checkRoot,
+        ...checkRoot.querySelectorAll(
+          'summary, [aria-label*="check" i], img[alt*="check" i], [data-checks-state]'
+        )
+      ]
+    : [];
   const checkText = checkNodes
     .map((node) => [
       node.getAttribute("aria-label"),

@@ -105,11 +105,93 @@ function findEmbeddedPayload(doc) {
   return null;
 }
 
+function classifyCheckSignal(text) {
+  const normalized = String(text || "");
+  if (/color-fg-danger|octicon-x|failing|failed|checks? not successful|checks? have failed/i.test(normalized)) {
+    return "failing";
+  }
+  if (/hx_dot-fill-pending-icon|color-fg-attention|pending|expected|running|in progress|checks? (?:are|is) still/i.test(normalized)) {
+    return "pending";
+  }
+  if (/color-fg-success|octicon-check|successful|passed|all checks have passed/i.test(normalized)) {
+    return "passing";
+  }
+  if (/no checks/i.test(normalized)) {
+    return "none";
+  }
+  const totals = normalized.match(/(\d+)\s*\/\s*(\d+)\s*checks? OK/i);
+  if (totals && totals[1] === totals[2]) {
+    return "passing";
+  }
+  return "unknown";
+}
+
+function checkSignalText(root) {
+  if (!root) {
+    return "";
+  }
+  const heading = root.querySelector?.(".status-heading");
+  if (heading && /\bchecks?\b/i.test(heading.textContent || "")) {
+    const meta = heading.parentElement?.querySelector?.(".status-meta");
+    return [heading.className, heading.textContent, meta?.className, meta?.textContent]
+      .filter(Boolean)
+      .join(" ");
+  }
+  const nodes = [
+    root,
+    ...root.querySelectorAll(
+      'summary, .status-heading, .status-meta, [aria-label*="check" i], img[alt*="check" i], [data-checks-state]'
+    )
+  ];
+  return nodes.map((node) => [
+    node.className,
+    node.getAttribute?.("aria-label"),
+    node.getAttribute?.("alt"),
+    node.getAttribute?.("data-checks-state"),
+    node.textContent
+  ].filter(Boolean).join(" ")).join(" ");
+}
+
+function findCurrentCheckRoot(doc) {
+  const mergeabilityRoot = doc.querySelector('.mergeability-details, [data-test-selector="mergebox"]');
+  if (mergeabilityRoot) {
+    const actionItems = [...mergeabilityRoot.querySelectorAll(".branch-action-item")];
+    const currentRollup = actionItems.find((item) => {
+      const heading = item.querySelector(".status-heading")?.textContent || "";
+      const meta = item.querySelector(".status-meta")?.textContent || "";
+      return /\bchecks?\b/i.test(`${heading} ${meta}`);
+    });
+    if (currentRollup) {
+      return currentRollup;
+    }
+    const nestedRollup = mergeabilityRoot.querySelector(".commit-build-statuses, [data-checks-state]");
+    if (nestedRollup) {
+      return nestedRollup;
+    }
+    return null;
+  }
+
+  const explicitRollups = [...doc.querySelectorAll("[data-checks-state]")];
+  if (explicitRollups.length) {
+    return explicitRollups.at(-1);
+  }
+  const commitRollups = [...doc.querySelectorAll(".commit-build-statuses")];
+  if (commitRollups.length) {
+    return commitRollups.at(-1);
+  }
+  const labelledRollups = [...doc.querySelectorAll('[aria-label*="checks" i], img[alt*="checks" i]')];
+  return labelledRollups.at(-1) || null;
+}
+
 function detailFromDom(doc) {
   let review = "unknown";
   let checks = "unknown";
   let merge = "unknown";
+  const mergeabilityRoot = doc.querySelector('.mergeability-details, [data-test-selector="mergebox"]');
+  const mergeabilityReviewRoot = [...mergeabilityRoot?.querySelectorAll(".branch-action-item") || []]
+    .find((item) => /\breview(?:ers?)?\b/i.test(item.querySelector(".status-heading")?.textContent || ""));
   const currentReviewRoot =
+    mergeabilityReviewRoot ||
     doc.querySelector('[data-url*="pull_requests%2Fsidebar%2Fshow%2Freviewers"]') ||
     doc.querySelector('form[id^="pull-request-reviewers-form-"]') ||
     doc.querySelector('[data-test-selector="required-review-banner"], [data-review-state]');
@@ -125,37 +207,15 @@ function detailFromDom(doc) {
     review = "changes_requested";
   } else if (/approved(?: these changes)?/i.test(reviewText)) {
     review = "approved";
-  } else if (/review required|required review|review requested/i.test(reviewText)) {
+  } else if (/review required|required review|review requested|requested review|approving review is required/i.test(reviewText)) {
     review = "required";
   } else if (/no reviews/i.test(reviewText)) {
     review = "none";
   }
 
-  const checkNodes = [
-    ...doc.querySelectorAll(
-      '.commit-build-statuses summary, [data-deferred-details-content-url*="/status-details"], [aria-label*="checks" i], [data-checks-state]'
-    )
-  ];
-  const checksText = checkNodes.map((node) => {
-    const labelled = [node, ...node.querySelectorAll("[aria-label]")];
-    return [
-      node.className,
-      node.getAttribute("data-checks-state"),
-      node.textContent,
-      ...labelled.map((item) => item.getAttribute("aria-label"))
-    ].filter(Boolean).join(" ");
-  }).join(" ");
-  if (/color-fg-danger|octicon-x|failing|failed|checks? not successful/i.test(checksText)) {
-    checks = "failing";
-  } else if (/hx_dot-fill-pending-icon|pending|expected|running|in progress/i.test(checksText)) {
-    checks = "pending";
-  } else if (/color-fg-success|successful|passed|all checks have passed|\d+\s*\/\s*\d+ checks OK/i.test(checksText)) {
-    checks = "passing";
-  } else if (/no checks/i.test(checksText)) {
-    checks = "none";
-  }
+  checks = classifyCheckSignal(checkSignalText(findCurrentCheckRoot(doc)));
 
-  const mergeText = doc.querySelector('[data-mergeability-message], [data-test-selector="mergebox"], [aria-label*="merge"]')?.textContent || "";
+  const mergeText = doc.querySelector('.mergeability-details, [data-mergeability-message], [data-test-selector="mergebox"], [aria-label*="merge"]')?.textContent || "";
   if (/\bconflicts?\b/i.test(mergeText) && !/\bno conflicts?\b/i.test(mergeText)) {
     merge = "conflicting";
   } else if (/cannot be merged|blocked|merge is blocked/i.test(mergeText)) {

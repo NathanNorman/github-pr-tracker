@@ -33,6 +33,20 @@ const CHECK_FILTER_LABELS = {
   unknown: "Checks unavailable"
 };
 
+const REVIEW_ROW_LABELS = {
+  approved: "Review approved",
+  changes_requested: "Changes requested",
+  required: "Review needed",
+  none: "No review needed"
+};
+
+const CHECK_ROW_LABELS = {
+  passing: "Checks passing",
+  failing: "Checks failing",
+  pending: "Checks pending",
+  none: "No checks"
+};
+
 export function createUi(container, handlers) {
   const doc = container.ownerDocument;
   const shadow = container.shadowRoot || container.attachShadow({ mode: "open" });
@@ -361,6 +375,7 @@ export function createUi(container, handlers) {
       return;
     }
 
+    let renderedRowIndex = 0;
     for (const group of state.summaryGroups) {
       const groupSection = doc.createElement("section");
       groupSection.className = "pr-group";
@@ -414,24 +429,39 @@ export function createUi(container, handlers) {
       title.textContent = summary.title;
       const details = doc.createElement("span");
       details.className = "row-details";
+      details.id = `pr-row-details-${renderedRowIndex}`;
+      renderedRowIndex += 1;
+      rowButton.setAttribute("aria-describedby", details.id);
+
+      const metadata = doc.createElement("span");
+      metadata.className = "row-metadata";
       if (summary.updatedAt) {
         const updated = doc.createElement("span");
         updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
-        details.append(updated);
+        metadata.append(updated);
       }
-      appendKnownBadge(details, "Review", summary.review);
-      appendKnownBadge(details, "Checks", summary.checks);
-      appendKnownBadge(details, "Merge", summary.merge);
+      appendKnownBadge(metadata, "Merge", summary.merge, "merge");
       if (Number.isInteger(summary.unresolvedThreads)) {
         const threads = doc.createElement("span");
         threads.className = "thread-count";
         threads.textContent = `${summary.unresolvedThreads} unresolved ${summary.unresolvedThreads === 1 ? "thread" : "threads"}`;
-        details.append(threads);
+        metadata.append(threads);
       }
       if (summary.draft) {
         const draftBadge = makeBadge("Draft", "draft");
         draftBadge.textContent = "Draft";
-        details.append(draftBadge);
+        metadata.append(draftBadge);
+      }
+      if (metadata.childElementCount) {
+        details.append(metadata);
+      }
+
+      const statusLines = doc.createElement("span");
+      statusLines.className = "row-status-lines";
+      appendNativeStatus(statusLines, "review", summary.review, REVIEW_ROW_LABELS);
+      appendNativeStatus(statusLines, "checks", summary.checks, CHECK_ROW_LABELS);
+      if (statusLines.childElementCount) {
+        details.append(statusLines);
       }
       if (record.status === "blocked" && record.blockedBy) {
         const blocker = doc.createElement("span");
@@ -860,17 +890,27 @@ export function createUi(container, handlers) {
     }
   }
 
-  function makeBadge(label, value) {
+  function makeBadge(label, value, kind = label.toLowerCase()) {
     const badge = doc.createElement("span");
     badge.className = "badge";
     badge.dataset.state = value;
+    badge.dataset.kind = kind;
     badge.textContent = `${label}: ${String(value).replaceAll("_", " ")}`;
     return badge;
   }
 
-  function appendKnownBadge(target, label, value) {
+  function appendKnownBadge(target, label, value, kind = label.toLowerCase()) {
     if (value && value !== "unknown") {
-      target.append(makeBadge(label, value));
+      target.append(makeBadge(label, value, kind));
+    }
+  }
+
+  function appendNativeStatus(target, kind, value, labels) {
+    if (value && value !== "unknown") {
+      const badge = makeBadge(kind, value, kind);
+      badge.classList.add("native-status-line");
+      badge.textContent = labels[value] || `${kind}: ${String(value).replaceAll("_", " ")}`;
+      target.append(badge);
     }
   }
 

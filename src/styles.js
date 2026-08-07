@@ -499,13 +499,25 @@ select {
   font-size: 13px;
 }
 .row-details {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+.row-metadata {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
   align-items: center;
-  margin-top: 7px;
-  color: var(--fgColor-muted, #59636e);
-  font-size: 12px;
+}
+.row-status-lines {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.native-status-line {
+  display: block;
 }
 .thread-count::before {
   content: "";

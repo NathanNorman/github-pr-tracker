@@ -73,6 +73,20 @@ test("parsePullListDocument isolates checks from generic review and merge icons"
   );
 });
 
+test("parsePullListDocument ignores ambiguous aggregate status containers", () => {
+  const doc = parseHtml(`
+    <div class="Box-row">
+      <a href="/acme/api/pull/16">Nested aggregate state</a>
+      <div class="status-checks color-fg-danger">
+        <div class="status-check-row color-fg-danger">Review required</div>
+        <div class="status-check-row color-fg-danger">Merging is blocked</div>
+        <div class="status-check-row color-fg-success">All checks have passed</div>
+      </div>
+    </div>
+  `);
+  assert.equal(parsePullListDocument(doc).items[0].checks, "unknown");
+});
+
 test("parsePullListDocument does not infer draft state from the PR title", () => {
   const doc = parseHtml(`
     <div data-issue-and-pr-hovercards-enabled="true">
@@ -125,7 +139,7 @@ test("detail parser falls back to semantic DOM states", async () => {
   });
 });
 
-test("detail parser isolates checks from blocked review and merge states", async () => {
+test("detail parser uses the current merge-box rollup instead of an older failed commit", async () => {
   const detail = parsePrDetailDocument(parseHtml(await fixture("detail-mixed-states.html")));
   assert.deepEqual(detail, {
     review: "required",
@@ -133,6 +147,45 @@ test("detail parser isolates checks from blocked review and merge states", async
     merge: "blocked",
     draft: undefined
   });
+});
+
+test("detail parser keeps reviews and checks independent in alternate merge-box markup", () => {
+  const cases = [
+    {
+      reviewHeading: "Code owner review required",
+      checksHeading: "All checks have passed",
+      expected: { review: "required", checks: "passing" }
+    },
+    {
+      reviewHeading: "Review approved",
+      checksHeading: "Some checks failed",
+      expected: { review: "approved", checks: "failing" }
+    }
+  ];
+
+  for (const { reviewHeading, checksHeading, expected } of cases) {
+    const detail = parsePrDetailDocument(parseHtml(`
+      <div data-test-selector="mergebox">
+        <div class="branch-action-item"><h3 class="status-heading">${reviewHeading}</h3></div>
+        <div class="branch-action-item"><h3 class="status-heading">${checksHeading}</h3></div>
+      </div>
+    `));
+    assert.equal(detail.review, expected.review);
+    assert.equal(detail.checks, expected.checks);
+  }
+});
+
+test("detail parser does not reuse an old failed commit when the current merge box has no checks row", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <details class="commit-build-statuses">
+      <summary class="color-fg-danger"><svg class="octicon octicon-x" aria-label="6 / 7 checks OK"></svg></summary>
+    </details>
+    <div class="mergeability-details">
+      <div class="branch-action-item"><h3 class="status-heading">Review approved</h3></div>
+    </div>
+  `));
+  assert.equal(detail.review, "approved");
+  assert.equal(detail.checks, "unknown");
 });
 
 test("detail parser stays unknown for historical timeline text", async () => {
