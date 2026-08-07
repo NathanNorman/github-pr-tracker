@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.2.2
+// @version      1.2.3
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
@@ -561,6 +561,7 @@
       }
       const updatedAt = row?.querySelector("relative-time")?.getAttribute("datetime") || "";
       const draft = Boolean(row?.textContent?.match(/\bDraft\b/i));
+      const listDetail = parsePullListDetail(row);
       items.push({
         key: parsed.key,
         url: parsed.url,
@@ -569,7 +570,8 @@
         number: parsed.number,
         title,
         updatedAt,
-        draft
+        draft,
+        ...listDetail
       });
     }
     const nextHref = doc.querySelector('a[rel="next"]')?.getAttribute("href") || [...doc.querySelectorAll("a")].find((anchor) => /^next$/i.test(anchor.textContent.trim()))?.getAttribute("href") || null;
@@ -642,6 +644,37 @@
       score += 20;
     }
     return score;
+  }
+  function parsePullListDetail(row) {
+    if (!row) {
+      return { review: "unknown", checks: "unknown", merge: "unknown" };
+    }
+    const rowText = row.textContent || "";
+    let review = "unknown";
+    if (/changes requested|requested changes/i.test(rowText)) {
+      review = "changes_requested";
+    } else if (/review required/i.test(rowText)) {
+      review = "required";
+    } else if (/\bapproved\b/i.test(rowText)) {
+      review = "approved";
+    }
+    const checkText = [...row.querySelectorAll('[aria-label], img[alt], [class*="status"], [class*="color-fg-"]')].map((node) => [
+      node.getAttribute("aria-label"),
+      node.getAttribute("alt"),
+      node.getAttribute("class")
+    ].filter(Boolean).join(" ")).join(" ");
+    const totals = checkText.match(/(\d+)\s*\/\s*(\d+)\s*checks? OK/i);
+    let checks = "unknown";
+    if (/color-fg-danger|octicon-x|failing|failed/i.test(checkText)) {
+      checks = "failing";
+    } else if (/color-fg-attention|pending|expected|running|in progress/i.test(checkText)) {
+      checks = "pending";
+    } else if (/color-fg-success|successful|passed/i.test(checkText)) {
+      checks = "passing";
+    } else if (totals && totals[1] === totals[2]) {
+      checks = "passing";
+    }
+    return { review, checks, merge: "unknown" };
   }
 
   // src/styles.js
@@ -1483,7 +1516,9 @@ select {
         appendKnownBadge(details, "Checks", summary.checks);
         appendKnownBadge(details, "Merge", summary.merge);
         if (summary.draft) {
-          details.append(makeBadge("Draft", "draft"));
+          const draftBadge = makeBadge("Draft", "draft");
+          draftBadge.textContent = "Draft";
+          details.append(draftBadge);
         }
         if (record.status === "blocked" && record.blockedBy) {
           const blocker = doc.createElement("span");
@@ -2249,11 +2284,12 @@ select {
     };
   }
   function mergeSummaryDetail(summary, detail) {
+    const merged = mergeNativeDetails(detail, summary);
     return {
-      review: detail.review,
-      checks: detail.checks,
-      merge: detail.merge,
-      draft: typeof detail.draft === "boolean" ? detail.draft : summary.draft
+      review: merged.review,
+      checks: merged.checks,
+      merge: merged.merge,
+      draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
     };
   }
 

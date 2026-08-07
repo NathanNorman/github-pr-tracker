@@ -21,6 +21,29 @@ test("parsePullListDocument groups duplicate links and ignores cross-origin pagi
   assert.equal(result.nextHref, null);
 });
 
+test("parsePullListDocument reads Toast Enterprise review and check signals", () => {
+  const doc = parseHtml(`
+    <div class="Box-row">
+      <a href="/acme/api/pull/12">Improve the API</a>
+      <svg class="color-fg-success" aria-label="7 / 7 checks OK"></svg>
+      <span>Review required before merging</span>
+    </div>
+    <div class="Box-row">
+      <a href="/acme/web/pull/13">Draft the UI</a>
+      <svg class="color-fg-danger octicon-x" aria-label="5 / 6 checks OK"></svg>
+      <span>Draft</span>
+    </div>
+  `);
+  const result = parsePullListDocument(doc);
+  assert.deepEqual(
+    result.items.map(({ key, review, checks, draft }) => ({ key, review, checks, draft })),
+    [
+      { key: "acme/api#12", review: "required", checks: "passing", draft: false },
+      { key: "acme/web#13", review: "unknown", checks: "failing", draft: true }
+    ]
+  );
+});
+
 test("fetchOpenPrs follows unique same-origin pagination links", async () => {
   const pages = new Map([
     ["https://github.toasttab.com/pulls?q=is%3Aopen+is%3Apr+archived%3Afalse+author%3A%40me", await fixture("pulls-page1.html")],

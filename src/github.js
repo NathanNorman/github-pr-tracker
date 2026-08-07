@@ -93,6 +93,7 @@ export function parsePullListDocument(doc, origin = GITHUB_ORIGIN) {
     }
     const updatedAt = row?.querySelector("relative-time")?.getAttribute("datetime") || "";
     const draft = Boolean(row?.textContent?.match(/\bDraft\b/i));
+    const listDetail = parsePullListDetail(row);
     items.push({
       key: parsed.key,
       url: parsed.url,
@@ -101,7 +102,8 @@ export function parsePullListDocument(doc, origin = GITHUB_ORIGIN) {
       number: parsed.number,
       title,
       updatedAt,
-      draft
+      draft,
+      ...listDetail
     });
   }
   const nextHref =
@@ -186,4 +188,41 @@ function scoreAnchor(anchor, parsed) {
     score += 20;
   }
   return score;
+}
+
+function parsePullListDetail(row) {
+  if (!row) {
+    return { review: "unknown", checks: "unknown", merge: "unknown" };
+  }
+
+  const rowText = row.textContent || "";
+  let review = "unknown";
+  if (/changes requested|requested changes/i.test(rowText)) {
+    review = "changes_requested";
+  } else if (/review required/i.test(rowText)) {
+    review = "required";
+  } else if (/\bapproved\b/i.test(rowText)) {
+    review = "approved";
+  }
+
+  const checkText = [...row.querySelectorAll('[aria-label], img[alt], [class*="status"], [class*="color-fg-"]')]
+    .map((node) => [
+      node.getAttribute("aria-label"),
+      node.getAttribute("alt"),
+      node.getAttribute("class")
+    ].filter(Boolean).join(" "))
+    .join(" ");
+  const totals = checkText.match(/(\d+)\s*\/\s*(\d+)\s*checks? OK/i);
+  let checks = "unknown";
+  if (/color-fg-danger|octicon-x|failing|failed/i.test(checkText)) {
+    checks = "failing";
+  } else if (/color-fg-attention|pending|expected|running|in progress/i.test(checkText)) {
+    checks = "pending";
+  } else if (/color-fg-success|successful|passed/i.test(checkText)) {
+    checks = "passing";
+  } else if (totals && totals[1] === totals[2]) {
+    checks = "passing";
+  }
+
+  return { review, checks, merge: "unknown" };
 }

@@ -458,10 +458,11 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
 }
 
 function mergeSummaryDetail(summary, detail) {
+  const merged = mergeNativeDetails(detail, summary);
   return {
-    review: detail.review,
-    checks: detail.checks,
-    merge: detail.merge,
-    draft: typeof detail.draft === "boolean" ? detail.draft : summary.draft
+    review: merged.review,
+    checks: merged.checks,
+    merge: merged.merge,
+    draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
   };
 }

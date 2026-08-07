@@ -235,7 +235,9 @@ export function createUi(container, handlers) {
       appendKnownBadge(details, "Checks", summary.checks);
       appendKnownBadge(details, "Merge", summary.merge);
       if (summary.draft) {
-        details.append(makeBadge("Draft", "draft"));
+        const draftBadge = makeBadge("Draft", "draft");
+        draftBadge.textContent = "Draft";
+        details.append(draftBadge);
       }
       if (record.status === "blocked" && record.blockedBy) {
         const blocker = doc.createElement("span");
