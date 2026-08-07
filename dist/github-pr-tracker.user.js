@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.2.3
+// @version      1.3.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
@@ -343,6 +343,34 @@
   }
 
   // src/models.js
+  var SORT_FIELDS = Object.freeze({
+    updated: "updated",
+    repository: "repository",
+    status: "status",
+    title: "title",
+    number: "number",
+    review: "review",
+    checks: "checks"
+  });
+  var SORT_DIRECTIONS = Object.freeze({
+    asc: "asc",
+    desc: "desc"
+  });
+  var DEFAULT_SORT_PREFERENCES = Object.freeze({
+    primary: {
+      field: SORT_FIELDS.updated,
+      direction: SORT_DIRECTIONS.desc
+    },
+    secondary: {
+      field: SORT_FIELDS.repository,
+      direction: SORT_DIRECTIONS.asc
+    }
+  });
+  var SORT_FIELD_SET = new Set(Object.values(SORT_FIELDS));
+  var SORT_DIRECTION_SET = new Set(Object.values(SORT_DIRECTIONS));
+  var PERSONAL_STATUS_ORDER = new Map(PERSONAL_STATUSES.map((status, index) => [status, index]));
+  var REVIEW_ORDER = new Map(REVIEW_STATES.map((status, index) => [status, index]));
+  var CHECK_ORDER = new Map(CHECK_STATES.map((status, index) => [status, index]));
   function createPrKey(owner, repo, number) {
     return `${owner}/${repo}#${number}`;
   }
@@ -404,7 +432,8 @@
       accountLogin: login,
       records,
       openListCache: normalizeOpenListCache(rawEnvelope?.openListCache),
-      detailCache: normalizeDetailCache(rawEnvelope?.detailCache)
+      detailCache: normalizeDetailCache(rawEnvelope?.detailCache),
+      sortPreferences: normalizeSortPreferences(rawEnvelope?.sortPreferences)
     };
   }
   function normalizeOpenListCache(rawCache) {
@@ -439,6 +468,65 @@
       }
     }
     return merged;
+  }
+  function normalizeSortPreferences(rawPreferences) {
+    const primary = normalizeSortLevel(rawPreferences?.primary, DEFAULT_SORT_PREFERENCES.primary);
+    const hasSecondaryPreference = Boolean(rawPreferences) && Object.hasOwn(rawPreferences, "secondary");
+    const secondary = normalizeSecondarySortLevel(
+      hasSecondaryPreference ? rawPreferences.secondary : void 0,
+      primary.field,
+      { useDefaultWhenMissing: !hasSecondaryPreference }
+    );
+    return {
+      primary,
+      secondary
+    };
+  }
+  function getAvailableSortOptions(summaries) {
+    return [
+      { value: SORT_FIELDS.updated, label: "Updated" },
+      { value: SORT_FIELDS.repository, label: "Repository" },
+      { value: SORT_FIELDS.status, label: "My status" },
+      { value: SORT_FIELDS.title, label: "Title" },
+      { value: SORT_FIELDS.number, label: "PR number" },
+      { value: SORT_FIELDS.review, label: "Review state" },
+      { value: SORT_FIELDS.checks, label: "Checks state" }
+    ];
+  }
+  function normalizeSortPreferencesForSummaries(rawPreferences, summaries) {
+    const availableFields = new Set(getAvailableSortOptions(summaries).map((option) => option.value));
+    const normalized = normalizeSortPreferences(rawPreferences);
+    const primaryMatchesRequested = availableFields.has(normalized.primary.field);
+    const primary = primaryMatchesRequested ? normalized.primary : DEFAULT_SORT_PREFERENCES.primary;
+    const secondaryMatchesRequested = normalized.secondary ? availableFields.has(normalized.secondary.field) && normalized.secondary.field !== primary.field : false;
+    const secondary = secondaryMatchesRequested ? normalized.secondary : !primaryMatchesRequested ? defaultSecondaryForPrimary(primary.field, availableFields) : null;
+    return {
+      primary,
+      secondary
+    };
+  }
+  function sortSummaries({ summaries, records, sortPreferences }) {
+    const normalizedPreferences = normalizeSortPreferencesForSummaries(sortPreferences, summaries);
+    return [...summaries].sort((left, right) => {
+      const leftRecord = records[left.key] || DEFAULT_RECORD;
+      const rightRecord = records[right.key] || DEFAULT_RECORD;
+      const comparisons = [normalizedPreferences.primary, normalizedPreferences.secondary].filter(Boolean);
+      for (const level of comparisons) {
+        const result = compareSortLevel(level, left, right, leftRecord, rightRecord);
+        if (result !== 0) {
+          return result;
+        }
+      }
+      const repoFallback = compareText(repositoryName(left), repositoryName(right), SORT_DIRECTIONS.asc);
+      if (repoFallback !== 0) {
+        return repoFallback;
+      }
+      const numberFallback = compareNumber(left.number, right.number, SORT_DIRECTIONS.asc);
+      if (numberFallback !== 0) {
+        return numberFallback;
+      }
+      return compareText(left.key, right.key, SORT_DIRECTIONS.asc);
+    });
   }
   function validateImportEnvelope(rawEnvelope) {
     if (!rawEnvelope || typeof rawEnvelope !== "object") {
@@ -478,6 +566,105 @@
       ].join("\n").toLocaleLowerCase();
       return haystack.includes(normalizedSearch);
     });
+  }
+  function normalizeSortLevel(rawLevel, fallback) {
+    const field = SORT_FIELD_SET.has(rawLevel?.field) ? rawLevel.field : fallback.field;
+    const direction = SORT_DIRECTION_SET.has(rawLevel?.direction) ? rawLevel.direction : fallback.direction;
+    return { field, direction };
+  }
+  function normalizeSecondarySortLevel(rawLevel, primaryField, { useDefaultWhenMissing = false } = {}) {
+    if (rawLevel == null || rawLevel.field === "none") {
+      return useDefaultWhenMissing ? defaultSecondaryForPrimary(primaryField) : null;
+    }
+    const fallback = defaultSecondaryForPrimary(primaryField) || {
+      field: SORT_FIELDS.repository,
+      direction: SORT_DIRECTIONS.asc
+    };
+    const level = normalizeSortLevel(rawLevel, fallback);
+    return level.field === primaryField ? defaultSecondaryForPrimary(primaryField) : level;
+  }
+  function defaultSecondaryForPrimary(primaryField, availableFields = SORT_FIELD_SET) {
+    if (primaryField !== SORT_FIELDS.repository && availableFields.has(SORT_FIELDS.repository)) {
+      return { ...DEFAULT_SORT_PREFERENCES.secondary };
+    }
+    if (primaryField !== SORT_FIELDS.updated && availableFields.has(SORT_FIELDS.updated)) {
+      return { ...DEFAULT_SORT_PREFERENCES.primary };
+    }
+    return null;
+  }
+  function compareSortLevel(level, leftSummary, rightSummary, leftRecord, rightRecord) {
+    switch (level.field) {
+      case SORT_FIELDS.updated:
+        return compareUpdated(leftSummary.updatedAt, rightSummary.updatedAt, level.direction);
+      case SORT_FIELDS.repository:
+        return compareText(repositoryName(leftSummary), repositoryName(rightSummary), level.direction);
+      case SORT_FIELDS.status:
+        return compareRank(PERSONAL_STATUS_ORDER, leftRecord.status, rightRecord.status, level.direction);
+      case SORT_FIELDS.title:
+        return compareText(leftSummary.title, rightSummary.title, level.direction);
+      case SORT_FIELDS.number:
+        return compareNumber(leftSummary.number, rightSummary.number, level.direction);
+      case SORT_FIELDS.review:
+        return compareRank(REVIEW_ORDER, leftSummary.review, rightSummary.review, level.direction);
+      case SORT_FIELDS.checks:
+        return compareRank(CHECK_ORDER, leftSummary.checks, rightSummary.checks, level.direction);
+      default:
+        return 0;
+    }
+  }
+  function compareUpdated(leftValue, rightValue, direction) {
+    const leftTimestamp = normalizeUpdatedTimestamp(leftValue);
+    const rightTimestamp = normalizeUpdatedTimestamp(rightValue);
+    if (leftTimestamp === null && rightTimestamp === null) {
+      return 0;
+    }
+    if (leftTimestamp === null) {
+      return 1;
+    }
+    if (rightTimestamp === null) {
+      return -1;
+    }
+    return direction === SORT_DIRECTIONS.asc ? leftTimestamp - rightTimestamp : rightTimestamp - leftTimestamp;
+  }
+  function normalizeUpdatedTimestamp(value) {
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+  function compareText(leftValue, rightValue, direction) {
+    const leftText = String(leftValue || "");
+    const rightText = String(rightValue || "");
+    const result = leftText.localeCompare(rightText, void 0, { sensitivity: "base", numeric: true });
+    return direction === SORT_DIRECTIONS.desc ? result * -1 : result;
+  }
+  function compareNumber(leftValue, rightValue, direction) {
+    const leftNumber = Number.isFinite(leftValue) ? leftValue : Number.POSITIVE_INFINITY;
+    const rightNumber = Number.isFinite(rightValue) ? rightValue : Number.POSITIVE_INFINITY;
+    return direction === SORT_DIRECTIONS.desc ? rightNumber - leftNumber : leftNumber - rightNumber;
+  }
+  function compareRank(rankMap, leftValue, rightValue, direction) {
+    const leftKnown = rankMap.has(leftValue) && leftValue !== "unknown";
+    const rightKnown = rankMap.has(rightValue) && rightValue !== "unknown";
+    if (!leftKnown && !rightKnown) {
+      return 0;
+    }
+    if (!leftKnown) {
+      return 1;
+    }
+    if (!rightKnown) {
+      return -1;
+    }
+    const leftRank = rankMap.get(leftValue);
+    const rightRank = rankMap.get(rightValue);
+    return direction === SORT_DIRECTIONS.desc ? rightRank - leftRank : leftRank - rightRank;
+  }
+  function repositoryName(summary) {
+    return [summary.owner, summary.repo].filter(Boolean).join("/");
   }
 
   // src/github.js
@@ -894,6 +1081,78 @@ select {
   font-size: 14px;
   font-weight: 600;
 }
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sort-menu {
+  position: relative;
+}
+.sort-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 7px;
+  background: var(--button-default-bgColor-rest, var(--bgColor-default, #ffffff));
+  color: var(--button-default-fgColor-rest, var(--fgColor-default, #1f2328));
+  font-size: 13px;
+  font-weight: 500;
+  list-style: none;
+  user-select: none;
+}
+.sort-summary::-webkit-details-marker {
+  display: none;
+}
+.sort-summary::after {
+  content: "\u25BE";
+  margin-left: 8px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 11px;
+}
+.sort-menu[open] .sort-summary,
+.sort-summary:hover {
+  background: var(--button-default-bgColor-hover, var(--bgColor-neutral-muted, #eaeef2));
+}
+.sort-rows {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 10px;
+  min-width: 320px;
+  padding: 12px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 10px;
+  background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
+  box-shadow: var(--shadow-floating-large, 0 12px 28px rgba(31,35,40,0.15));
+}
+.sort-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 118px;
+  gap: 8px;
+  align-items: center;
+}
+.sort-row-label {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  font-weight: 600;
+}
+.sort-row select {
+  height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 6px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-default, #1f2328);
+}
+.sort-row select:disabled {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+}
 .action-btn,
 .link-btn,
 .icon-btn {
@@ -1276,6 +1535,14 @@ select {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
+  .panel-header {
+    align-items: flex-start;
+  }
+  .panel-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
   .status-sidebar {
     position: static;
   }
@@ -1290,8 +1557,19 @@ select {
   .sidebar-tools {
     display: none;
   }
+  .sort-rows {
+    min-width: min(320px, calc(100vw - 48px));
+  }
 }
 @media (max-width: 620px) {
+  .panel-header,
+  .drawer-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sort-row {
+    grid-template-columns: 1fr;
+  }
   .pr-row {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
@@ -1376,8 +1654,26 @@ select {
     panelHeader.className = "panel-header";
     const resultCount = doc.createElement("strong");
     resultCount.className = "result-count";
+    const panelActions = doc.createElement("div");
+    panelActions.className = "panel-actions";
+    const sortMenu = doc.createElement("details");
+    sortMenu.className = "sort-menu";
+    const sortSummary = doc.createElement("summary");
+    sortSummary.className = "sort-summary";
+    sortSummary.textContent = "Sort";
+    const sortRows = doc.createElement("div");
+    sortRows.className = "sort-rows";
+    const primaryFieldSelect = makeSelect("sort-primary-field", "Primary sort field");
+    const primaryDirectionSelect = makeSelect("sort-primary-direction", "Primary sort direction");
+    const secondaryFieldSelect = makeSelect("sort-secondary-field", "Secondary sort field");
+    const secondaryDirectionSelect = makeSelect("sort-secondary-direction", "Secondary sort direction");
+    const sortByRow = makeSortRow("Sort by", primaryFieldSelect, primaryDirectionSelect);
+    const thenByRow = makeSortRow("Then by", secondaryFieldSelect, secondaryDirectionSelect);
+    sortRows.append(sortByRow, thenByRow);
+    sortMenu.append(sortSummary, sortRows);
     const refreshButton = makeActionButton("Refresh", () => handlers.onRefresh(), "action-btn");
-    panelHeader.append(resultCount, refreshButton);
+    panelActions.append(sortMenu, refreshButton);
+    panelHeader.append(resultCount, panelActions);
     const warning = doc.createElement("div");
     warning.className = "warning";
     const list = doc.createElement("div");
@@ -1419,6 +1715,7 @@ select {
       showCompleted.setAttribute("aria-pressed", String(state.showCompleted));
       refreshButton.textContent = state.refreshing ? "Refreshing\u2026" : "Refresh";
       refreshButton.disabled = state.refreshing;
+      renderSortControls(state);
       const counts = countStatuses(state);
       const options = ["all", ...PERSONAL_STATUSES];
       const existing = new Map([...filters.querySelectorAll("button")].map((button) => [button.dataset.status, button]));
@@ -1447,6 +1744,24 @@ select {
       for (const stale of existing.values()) {
         stale.remove();
       }
+    }
+    function renderSortControls(state) {
+      syncSelectOptions(primaryFieldSelect, state.sortOptions);
+      syncSelectOptions(secondaryFieldSelect, [{ value: "none", label: "None" }, ...state.sortOptions]);
+      syncSelectOptions(primaryDirectionSelect, directionOptionsForField(state.sortPreferences.primary.field));
+      syncSelectOptions(
+        secondaryDirectionSelect,
+        state.sortPreferences.secondary ? directionOptionsForField(state.sortPreferences.secondary.field) : directionOptionsForField(state.sortPreferences.primary.field)
+      );
+      primaryFieldSelect.value = state.sortPreferences.primary.field;
+      primaryDirectionSelect.value = state.sortPreferences.primary.direction;
+      secondaryFieldSelect.value = state.sortPreferences.secondary?.field || "none";
+      for (const option of secondaryFieldSelect.options) {
+        option.disabled = option.value === state.sortPreferences.primary.field;
+      }
+      secondaryDirectionSelect.disabled = !state.sortPreferences.secondary;
+      secondaryDirectionSelect.value = state.sortPreferences.secondary?.direction || "asc";
+      sortSummary.textContent = summarizeSort(state.sortPreferences, state.sortOptions);
     }
     function updateWarning(message) {
       warning.hidden = !message;
@@ -1706,6 +2021,15 @@ select {
       }
       return select;
     }
+    function makeSortRow(labelText, fieldSelect, directionSelect) {
+      const row = doc.createElement("label");
+      row.className = "sort-row";
+      const label = doc.createElement("span");
+      label.className = "sort-row-label";
+      label.textContent = labelText;
+      row.append(label, fieldSelect, directionSelect);
+      return row;
+    }
     function makeField(labelText) {
       const field = doc.createElement("label");
       field.className = "field";
@@ -1842,6 +2166,77 @@ select {
       }
       return button;
     }
+    function makeSelect(focusId, ariaLabel) {
+      const select = doc.createElement("select");
+      select.setAttribute("data-focus-id", focusId);
+      select.setAttribute("aria-label", ariaLabel);
+      return select;
+    }
+    function syncSelectOptions(select, options) {
+      const signature = options.map((option) => `${option.value}:${option.label}`).join("|");
+      if (select.dataset.optionsSignature === signature) {
+        return;
+      }
+      select.dataset.optionsSignature = signature;
+      select.replaceChildren(
+        ...options.map((option) => {
+          const element = doc.createElement("option");
+          element.value = option.value;
+          element.textContent = option.label;
+          return element;
+        })
+      );
+    }
+    function directionOptionsForField(field) {
+      if (field === "updated") {
+        return [
+          { value: "desc", label: "Newest first" },
+          { value: "asc", label: "Oldest first" }
+        ];
+      }
+      if (field === "number") {
+        return [
+          { value: "desc", label: "Highest first" },
+          { value: "asc", label: "Lowest first" }
+        ];
+      }
+      if (field === "repository" || field === "title") {
+        return [
+          { value: "asc", label: "A to Z" },
+          { value: "desc", label: "Z to A" }
+        ];
+      }
+      return [
+        { value: "asc", label: "Workflow order" },
+        { value: "desc", label: "Reverse order" }
+      ];
+    }
+    function emitSortChange() {
+      const next = {
+        primary: {
+          field: primaryFieldSelect.value,
+          direction: primaryDirectionSelect.value
+        },
+        secondary: secondaryFieldSelect.value === "none" ? null : {
+          field: secondaryFieldSelect.value,
+          direction: secondaryDirectionSelect.value
+        }
+      };
+      void handlers.onSortChange?.(next);
+    }
+    primaryFieldSelect.addEventListener("change", () => {
+      syncSelectOptions(primaryDirectionSelect, directionOptionsForField(primaryFieldSelect.value));
+      emitSortChange();
+    });
+    primaryDirectionSelect.addEventListener("change", emitSortChange);
+    secondaryFieldSelect.addEventListener("change", () => {
+      syncSelectOptions(
+        secondaryDirectionSelect,
+        secondaryFieldSelect.value === "none" ? directionOptionsForField(primaryFieldSelect.value) : directionOptionsForField(secondaryFieldSelect.value)
+      );
+      emitSortChange();
+    });
+    secondaryDirectionSelect.addEventListener("change", emitSortChange);
     return { render, shadow, flushPending, setSaveState };
   }
   function countStatuses(state) {
@@ -1881,6 +2276,14 @@ select {
     const text = String(value).replace(/\s+/g, " ").trim();
     return text.length > 110 ? `Note \xB7 ${text.slice(0, 107)}\u2026` : `Note \xB7 ${text}`;
   }
+  function summarizeSort(sortPreferences, sortOptions) {
+    const labels = new Map(sortOptions.map((option) => [option.value, option.label]));
+    const describe = (level) => {
+      const label = labels.get(level.field) || level.field;
+      return `${label} ${level.direction === "desc" ? "\u2193" : "\u2191"}`;
+    };
+    return sortPreferences.secondary ? `Sort: ${describe(sortPreferences.primary)}, ${describe(sortPreferences.secondary)}` : `Sort: ${describe(sortPreferences.primary)}`;
+  }
 
   // src/app.js
   function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }) {
@@ -1892,6 +2295,7 @@ select {
       search: "",
       statusFilter: "all",
       tagFilter: "",
+      sortPreferences: null,
       selectedKey: null,
       showCompleted: false,
       refreshing: false,
@@ -1916,22 +2320,29 @@ select {
       const envelope = await storage.load();
       state.records = envelope.records;
       state.allSummaries = envelope.openListCache.items || [];
+      state.sortPreferences = normalizeSortPreferencesForSummaries(envelope.sortPreferences, state.allSummaries);
       state.filteredSummaries = computeFiltered();
       unsubscribe = storage.subscribe((nextEnvelope) => {
         state.records = nextEnvelope.records;
+        state.sortPreferences = normalizeSortPreferencesForSummaries(nextEnvelope.sortPreferences, state.allSummaries);
         state.filteredSummaries = computeFiltered();
         render();
       });
       await handleRoute();
     }
     function computeFiltered() {
-      return filterSummaries({
+      const filtered = filterSummaries({
         summaries: state.allSummaries,
         records: state.records,
         search: state.search,
         statusFilter: state.statusFilter,
         tagFilter: state.tagFilter,
         showCompleted: state.showCompleted
+      });
+      return sortSummaries({
+        summaries: filtered,
+        records: state.records,
+        sortPreferences: state.sortPreferences
       });
     }
     function mount() {
@@ -2080,6 +2491,7 @@ select {
           await storage.save(latest);
           state.allSummaries = enriched;
           state.records = latest.records;
+          state.sortPreferences = normalizeSortPreferencesForSummaries(latest.sortPreferences, enriched);
           if (state.selectedKey && !state.allSummaries.some((item) => item.key === state.selectedKey)) {
             state.selectedKey = null;
           }
@@ -2204,6 +2616,19 @@ select {
           state.filteredSummaries = computeFiltered();
           render();
         },
+        async onSortChange(sortPreferences) {
+          const previous = state.sortPreferences;
+          state.sortPreferences = normalizeSortPreferencesForSummaries(sortPreferences, state.allSummaries);
+          state.filteredSummaries = computeFiltered();
+          render();
+          try {
+            await storage.updateSortPreferences(state.sortPreferences);
+          } catch (error) {
+            state.sortPreferences = previous;
+            state.warning = `Could not save sorting. ${error.message}`;
+            render();
+          }
+        },
         onSelect(key) {
           if (state.selectedKey && state.selectedKey !== key) {
             void ui?.flushPending(state.selectedKey);
@@ -2268,6 +2693,8 @@ select {
       state.filteredSummaries = computeFiltered();
       ui.render({
         ...state,
+        sortPreferences: normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries),
+        sortOptions: getAvailableSortOptions(state.allSummaries),
         styles
       });
     }
@@ -2330,6 +2757,18 @@ select {
       }
       return envelope;
     }
+    async function updateSortPreferences(sortPreferences) {
+      const envelope = await load();
+      envelope.sortPreferences = normalizeSortPreferences({
+        ...envelope.sortPreferences,
+        ...sortPreferences
+      });
+      await save(envelope);
+      for (const listener of listeners) {
+        listener(envelope);
+      }
+      return envelope;
+    }
     async function importEnvelope(rawEnvelope) {
       validateImportEnvelope(rawEnvelope);
       if (rawEnvelope.accountLogin !== login) {
@@ -2350,6 +2789,7 @@ select {
       save,
       subscribe,
       upsertRecord,
+      updateSortPreferences,
       importEnvelope
     };
   }

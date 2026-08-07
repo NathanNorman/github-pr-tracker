@@ -28,10 +28,12 @@ Fallback import steps:
 - Personal statuses are `unsorted`, `next_up`, `waiting`, `blocked`, and `done`.
 - `Show completed` reveals `done` items without mixing them into the default active views.
 - Click a private tag to filter by it.
+- Use the compact `Sort` menu to choose a primary and optional secondary order. Available fields include update time, repository, personal status, title, PR number, review state, and checks state.
+- Sorting defaults to newest updated first, then repository. Your selection is saved locally for the next visit.
 
 ## Personal Data And Backup
 
-- Personal notes, blocker text, statuses, and private tags are stored locally in Tampermonkey storage, namespaced by signed-in GitHub account.
+- Personal notes, blocker text, statuses, private tags, and sorting preferences are stored locally in Tampermonkey storage, namespaced by signed-in GitHub account.
 - Export/import uses versioned JSON and merges records by stable PR key `owner/repository#number`.
 - Import never deletes unmatched local records and keeps the newest `modifiedAt` when the same PR exists in both places.
 

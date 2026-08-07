@@ -77,8 +77,26 @@ export function createUi(container, handlers) {
   panelHeader.className = "panel-header";
   const resultCount = doc.createElement("strong");
   resultCount.className = "result-count";
+  const panelActions = doc.createElement("div");
+  panelActions.className = "panel-actions";
+  const sortMenu = doc.createElement("details");
+  sortMenu.className = "sort-menu";
+  const sortSummary = doc.createElement("summary");
+  sortSummary.className = "sort-summary";
+  sortSummary.textContent = "Sort";
+  const sortRows = doc.createElement("div");
+  sortRows.className = "sort-rows";
+  const primaryFieldSelect = makeSelect("sort-primary-field", "Primary sort field");
+  const primaryDirectionSelect = makeSelect("sort-primary-direction", "Primary sort direction");
+  const secondaryFieldSelect = makeSelect("sort-secondary-field", "Secondary sort field");
+  const secondaryDirectionSelect = makeSelect("sort-secondary-direction", "Secondary sort direction");
+  const sortByRow = makeSortRow("Sort by", primaryFieldSelect, primaryDirectionSelect);
+  const thenByRow = makeSortRow("Then by", secondaryFieldSelect, secondaryDirectionSelect);
+  sortRows.append(sortByRow, thenByRow);
+  sortMenu.append(sortSummary, sortRows);
   const refreshButton = makeActionButton("Refresh", () => handlers.onRefresh(), "action-btn");
-  panelHeader.append(resultCount, refreshButton);
+  panelActions.append(sortMenu, refreshButton);
+  panelHeader.append(resultCount, panelActions);
 
   const warning = doc.createElement("div");
   warning.className = "warning";
@@ -130,6 +148,7 @@ export function createUi(container, handlers) {
     showCompleted.setAttribute("aria-pressed", String(state.showCompleted));
     refreshButton.textContent = state.refreshing ? "Refreshing…" : "Refresh";
     refreshButton.disabled = state.refreshing;
+    renderSortControls(state);
 
     const counts = countStatuses(state);
     const options = ["all", ...PERSONAL_STATUSES];
@@ -161,6 +180,27 @@ export function createUi(container, handlers) {
     for (const stale of existing.values()) {
       stale.remove();
     }
+  }
+
+  function renderSortControls(state) {
+    syncSelectOptions(primaryFieldSelect, state.sortOptions);
+    syncSelectOptions(secondaryFieldSelect, [{ value: "none", label: "None" }, ...state.sortOptions]);
+    syncSelectOptions(primaryDirectionSelect, directionOptionsForField(state.sortPreferences.primary.field));
+    syncSelectOptions(
+      secondaryDirectionSelect,
+      state.sortPreferences.secondary ? directionOptionsForField(state.sortPreferences.secondary.field) : directionOptionsForField(state.sortPreferences.primary.field)
+    );
+
+    primaryFieldSelect.value = state.sortPreferences.primary.field;
+    primaryDirectionSelect.value = state.sortPreferences.primary.direction;
+    secondaryFieldSelect.value = state.sortPreferences.secondary?.field || "none";
+    for (const option of secondaryFieldSelect.options) {
+      option.disabled = option.value === state.sortPreferences.primary.field;
+    }
+    secondaryDirectionSelect.disabled = !state.sortPreferences.secondary;
+    secondaryDirectionSelect.value = state.sortPreferences.secondary?.direction || "asc";
+
+    sortSummary.textContent = summarizeSort(state.sortPreferences, state.sortOptions);
   }
 
   function updateWarning(message) {
@@ -447,6 +487,16 @@ export function createUi(container, handlers) {
     return select;
   }
 
+  function makeSortRow(labelText, fieldSelect, directionSelect) {
+    const row = doc.createElement("label");
+    row.className = "sort-row";
+    const label = doc.createElement("span");
+    label.className = "sort-row-label";
+    label.textContent = labelText;
+    row.append(label, fieldSelect, directionSelect);
+    return row;
+  }
+
   function makeField(labelText) {
     const field = doc.createElement("label");
     field.className = "field";
@@ -596,6 +646,86 @@ export function createUi(container, handlers) {
     return button;
   }
 
+  function makeSelect(focusId, ariaLabel) {
+    const select = doc.createElement("select");
+    select.setAttribute("data-focus-id", focusId);
+    select.setAttribute("aria-label", ariaLabel);
+    return select;
+  }
+
+  function syncSelectOptions(select, options) {
+    const signature = options.map((option) => `${option.value}:${option.label}`).join("|");
+    if (select.dataset.optionsSignature === signature) {
+      return;
+    }
+    select.dataset.optionsSignature = signature;
+    select.replaceChildren(
+      ...options.map((option) => {
+        const element = doc.createElement("option");
+        element.value = option.value;
+        element.textContent = option.label;
+        return element;
+      })
+    );
+  }
+
+  function directionOptionsForField(field) {
+    if (field === "updated") {
+      return [
+        { value: "desc", label: "Newest first" },
+        { value: "asc", label: "Oldest first" }
+      ];
+    }
+    if (field === "number") {
+      return [
+        { value: "desc", label: "Highest first" },
+        { value: "asc", label: "Lowest first" }
+      ];
+    }
+    if (field === "repository" || field === "title") {
+      return [
+        { value: "asc", label: "A to Z" },
+        { value: "desc", label: "Z to A" }
+      ];
+    }
+    return [
+      { value: "asc", label: "Workflow order" },
+      { value: "desc", label: "Reverse order" }
+    ];
+  }
+
+  function emitSortChange() {
+    const next = {
+      primary: {
+        field: primaryFieldSelect.value,
+        direction: primaryDirectionSelect.value
+      },
+      secondary: secondaryFieldSelect.value === "none"
+        ? null
+        : {
+            field: secondaryFieldSelect.value,
+            direction: secondaryDirectionSelect.value
+          }
+    };
+    void handlers.onSortChange?.(next);
+  }
+
+  primaryFieldSelect.addEventListener("change", () => {
+    syncSelectOptions(primaryDirectionSelect, directionOptionsForField(primaryFieldSelect.value));
+    emitSortChange();
+  });
+  primaryDirectionSelect.addEventListener("change", emitSortChange);
+  secondaryFieldSelect.addEventListener("change", () => {
+    syncSelectOptions(
+      secondaryDirectionSelect,
+      secondaryFieldSelect.value === "none"
+        ? directionOptionsForField(primaryFieldSelect.value)
+        : directionOptionsForField(secondaryFieldSelect.value)
+    );
+    emitSortChange();
+  });
+  secondaryDirectionSelect.addEventListener("change", emitSortChange);
+
   return { render, shadow, flushPending, setSaveState };
 }
 
@@ -638,4 +768,15 @@ function formatRelativeTime(value) {
 function compactNote(value) {
   const text = String(value).replace(/\s+/g, " ").trim();
   return text.length > 110 ? `Note · ${text.slice(0, 107)}…` : `Note · ${text}`;
+}
+
+function summarizeSort(sortPreferences, sortOptions) {
+  const labels = new Map(sortOptions.map((option) => [option.value, option.label]));
+  const describe = (level) => {
+    const label = labels.get(level.field) || level.field;
+    return `${label} ${level.direction === "desc" ? "↓" : "↑"}`;
+  };
+  return sortPreferences.secondary
+    ? `Sort: ${describe(sortPreferences.primary)}, ${describe(sortPreferences.secondary)}`
+    : `Sort: ${describe(sortPreferences.primary)}`;
 }

@@ -1,5 +1,11 @@
 import { APP_ID, DEFAULT_RECORD } from "./constants.js";
-import { mergeImportedRecords, normalizeEnvelope, normalizeRecord, validateImportEnvelope } from "./models.js";
+import {
+  mergeImportedRecords,
+  normalizeEnvelope,
+  normalizeRecord,
+  normalizeSortPreferences,
+  validateImportEnvelope
+} from "./models.js";
 
 export function createStorage(gm, login) {
   const storageKey = `${APP_ID}:${login}`;
@@ -45,6 +51,19 @@ export function createStorage(gm, login) {
     return envelope;
   }
 
+  async function updateSortPreferences(sortPreferences) {
+    const envelope = await load();
+    envelope.sortPreferences = normalizeSortPreferences({
+      ...envelope.sortPreferences,
+      ...sortPreferences
+    });
+    await save(envelope);
+    for (const listener of listeners) {
+      listener(envelope);
+    }
+    return envelope;
+  }
+
   async function importEnvelope(rawEnvelope) {
     validateImportEnvelope(rawEnvelope);
     if (rawEnvelope.accountLogin !== login) {
@@ -66,6 +85,7 @@ export function createStorage(gm, login) {
     save,
     subscribe,
     upsertRecord,
+    updateSortPreferences,
     importEnvelope
   };
 }

@@ -1,7 +1,13 @@
 import { DETAIL_CACHE_TTL_MS, DETAIL_PARSER_VERSION, DEFAULT_RECORD } from "./constants.js";
 import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, parsePrDetailPayload } from "./detail-parser.js";
 import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl, trackerSearchUrl } from "./github.js";
-import { filterSummaries, normalizeTags } from "./models.js";
+import {
+  filterSummaries,
+  getAvailableSortOptions,
+  normalizeSortPreferencesForSummaries,
+  normalizeTags,
+  sortSummaries
+} from "./models.js";
 import { styles } from "./styles.js";
 import { createUi } from "./ui.js";
 import { mapLimit, now } from "./utils.js";
@@ -15,6 +21,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     search: "",
     statusFilter: "all",
     tagFilter: "",
+    sortPreferences: null,
     selectedKey: null,
     showCompleted: false,
     refreshing: false,
@@ -41,9 +48,11 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     const envelope = await storage.load();
     state.records = envelope.records;
     state.allSummaries = envelope.openListCache.items || [];
+    state.sortPreferences = normalizeSortPreferencesForSummaries(envelope.sortPreferences, state.allSummaries);
     state.filteredSummaries = computeFiltered();
     unsubscribe = storage.subscribe((nextEnvelope) => {
       state.records = nextEnvelope.records;
+      state.sortPreferences = normalizeSortPreferencesForSummaries(nextEnvelope.sortPreferences, state.allSummaries);
       state.filteredSummaries = computeFiltered();
       render();
     });
@@ -51,13 +60,18 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
   }
 
   function computeFiltered() {
-    return filterSummaries({
+    const filtered = filterSummaries({
       summaries: state.allSummaries,
       records: state.records,
       search: state.search,
       statusFilter: state.statusFilter,
       tagFilter: state.tagFilter,
       showCompleted: state.showCompleted
+    });
+    return sortSummaries({
+      summaries: filtered,
+      records: state.records,
+      sortPreferences: state.sortPreferences
     });
   }
 
@@ -238,6 +252,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         await storage.save(latest);
         state.allSummaries = enriched;
         state.records = latest.records;
+        state.sortPreferences = normalizeSortPreferencesForSummaries(latest.sortPreferences, enriched);
         if (state.selectedKey && !state.allSummaries.some((item) => item.key === state.selectedKey)) {
           state.selectedKey = null;
         }
@@ -374,6 +389,19 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         state.filteredSummaries = computeFiltered();
         render();
       },
+      async onSortChange(sortPreferences) {
+        const previous = state.sortPreferences;
+        state.sortPreferences = normalizeSortPreferencesForSummaries(sortPreferences, state.allSummaries);
+        state.filteredSummaries = computeFiltered();
+        render();
+        try {
+          await storage.updateSortPreferences(state.sortPreferences);
+        } catch (error) {
+          state.sortPreferences = previous;
+          state.warning = `Could not save sorting. ${error.message}`;
+          render();
+        }
+      },
       onSelect(key) {
         if (state.selectedKey && state.selectedKey !== key) {
           void ui?.flushPending(state.selectedKey);
@@ -440,6 +468,8 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     state.filteredSummaries = computeFiltered();
     ui.render({
       ...state,
+      sortPreferences: normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries),
+      sortOptions: getAvailableSortOptions(state.allSummaries),
       styles
     });
   }

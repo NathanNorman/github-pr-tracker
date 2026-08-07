@@ -25,6 +25,13 @@ function makeStorage(seed) {
       }
       return envelope;
     },
+    async updateSortPreferences(sortPreferences) {
+      envelope.sortPreferences = structuredClone(sortPreferences);
+      for (const callback of subscribers) {
+        callback(structuredClone(envelope));
+      }
+      return envelope;
+    },
     async importEnvelope(raw) {
       if (raw.accountLogin && raw.accountLogin !== envelope.accountLogin) {
         throw new Error(`Import account ${raw.accountLogin} does not match signed-in account ${envelope.accountLogin}.`);
@@ -257,6 +264,85 @@ test("detail refresh merges deferred fields and preserves list draft flag", asyn
   assert.equal(summary.merge, "blocked");
   assert.equal(summary.draft, true);
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, 2);
+});
+
+test("default sort is updated desc then repository asc with invalid timestamps last", async () => {
+  const dom = makeDom("https://github.toasttab.com/pulls");
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    sortPreferences: null,
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "acme/zebra#5", owner: "acme", repo: "zebra", number: 5, title: "Five", url: "https://github.toasttab.com/acme/zebra/pull/5", updatedAt: "2026-08-05T10:00:00Z" },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", updatedAt: "2026-08-06T10:00:00Z" },
+        { key: "acme/core#1", owner: "acme", repo: "core", number: 1, title: "One", url: "https://github.toasttab.com/acme/core/pull/1", updatedAt: "invalid-date" }
+      ]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => ({ ok: true, text: async () => "<html><body></body></html>", headers: { get: () => "text/html" } })
+  });
+  await app.init();
+  assert.deepEqual(app.getState().filteredSummaries.map((summary) => summary.key), [
+    "acme/api#2",
+    "acme/zebra#5",
+    "acme/core#1"
+  ]);
+});
+
+test("sort menu can disable secondary sort and persists null", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    sortPreferences: null,
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Bravo", url: "https://github.toasttab.com/acme/api/pull/2", updatedAt: "2026-08-06T10:00:00Z", review: "approved" },
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Alpha", url: "https://github.toasttab.com/acme/api/pull/1", updatedAt: "2026-08-06T10:00:00Z", review: "approved" }
+      ]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([
+              { href: "/acme/api/pull/2", title: "Bravo", draft: false },
+              { href: "/acme/api/pull/1", title: "Alpha", draft: false }
+            ])
+          : "<html><body></body></html>",
+      headers: { get: () => "text/html" }
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const selects = [...shadow.querySelectorAll(".sort-row select")];
+  const [primaryField, primaryDirection, secondaryField] = selects;
+
+  assert.equal(primaryField.getAttribute("aria-label"), "Primary sort field");
+  assert.equal(primaryDirection.options[0].textContent, "Newest first");
+  assert.equal([...secondaryField.options].find((option) => option.value === "updated").disabled, true);
+
+  primaryField.value = "title";
+  primaryField.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  primaryDirection.value = "asc";
+  primaryDirection.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  secondaryField.value = "none";
+  secondaryField.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+
+  assert.equal(storage.getEnvelope().sortPreferences.secondary, null);
+  assert.deepEqual(app.getState().filteredSummaries.map((summary) => summary.key), ["acme/api#1", "acme/api#2"]);
 });
 
 test("invalid nested buttons are avoided and row selection remains keyboard-accessible", async () => {
