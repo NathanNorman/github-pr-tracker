@@ -230,7 +230,15 @@ function parsePullListDetail(row, parsed) {
   const checkRoots = [...row.querySelectorAll(
     '[data-checks-state], .commit-build-statuses, [aria-label*="check" i], img[alt*="check" i], [class~="status-check" i], [class~="check-status" i]'
   )];
-  const checkRoot = checkRoots.at(-1);
+  // Prefer GitHub's status wrapper over a nested count icon. A successful
+  // rollup can say "37 / 81 checks OK" when the other checks were skipped;
+  // the wrapper's green state is authoritative in that case.
+  const checkRoot = checkRoots
+    .filter((node) =>
+      node.matches("[data-checks-state]") ||
+      (node.matches(".commit-build-statuses") && node.querySelector('summary, [aria-label*="check" i], img[alt*="check" i]'))
+    )
+    .at(-1) || checkRoots.at(-1);
   const checkNodes = checkRoot
     ? [
         checkRoot,

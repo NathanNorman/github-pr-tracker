@@ -365,6 +365,70 @@ test("detail refresh lets current-head status-details override a stale known fai
   assert.match(shadow.textContent, /Checks passing/);
 });
 
+test("detail refresh prefers the exact current-head icon over stale main and historical status signals", async () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const oldSha = "abcdef1234567890abcdef1234567890abcdef12";
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: { updatedAt: 1, items: [] },
+    detailCache: {}
+  });
+  const requested = [];
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => {
+      const value = String(url);
+      requested.push(value);
+      if (value.includes("/pulls")) {
+        return {
+          ok: true,
+          text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]).replace(
+            "</div>",
+            `<details class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"><summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary></details></div>`
+          )
+        };
+      }
+      if (value.endsWith("/pull/1")) {
+        return {
+          ok: true,
+          text: async () => `
+            <html><body>
+              <div data-url="/acme/api/pull/1/partials/commit_status_icon?oid=${oldSha}"></div>
+              <div data-url="/acme/api/pull/1/partials/commit_status_icon?oid=${sha}"></div>
+              <div class="mergeability-details">
+                <div class="branch-action-item"><h3 class="status-heading">Some checks failed</h3></div>
+                <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
+              </div>
+            </body></html>`
+        };
+      }
+      if (value.includes(`/partials/commit_status_icon?oid=${sha}`)) {
+        return {
+          ok: true,
+          text: async () => `<details class="commit-build-statuses"><summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary></details>`,
+          headers: { get: () => "text/html" }
+        };
+      }
+      if (value.includes("/status-details")) {
+        return { ok: false, status: 503, headers: { get: () => "text/html" } };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      throw new Error(`Unexpected url ${value}`);
+    }
+  });
+
+  await app.init();
+  assert.equal(app.getState().allSummaries[0].checks, "passing");
+  assert.equal(requested.some((url) => url.includes(`oid=${oldSha}`)), false);
+  assert.equal(requested.some((url) => url.includes(`/commit/${sha}/status-details`)), false);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"].headSha, sha);
+});
+
 test("detail cache preserves fetch timestamp on cache hits and misses old cache entries without a matching head sha", async () => {
   const sha = "1234567890abcdef1234567890abcdef12345678";
   const dom = makeDom();
@@ -429,7 +493,7 @@ test("detail cache preserves fetch timestamp on cache hits and misses old cache 
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].updatedAt, firstCacheEntry.updatedAt);
 });
 
-test("current-head status failures are not cached as verified head-aware entries and retry on the next refresh", async () => {
+test("current-head status failures fall back to the current green list row without caching and retry", async () => {
   const sha = "1234567890abcdef1234567890abcdef12345678";
   const dom = makeDom();
   const storage = makeStorage({
@@ -449,7 +513,7 @@ test("current-head status failures are not cached as verified head-aware entries
           ok: true,
           text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]).replace(
             "</div>",
-            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
+            `<details class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"><summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary></details></div>`
           )
         };
       }
@@ -478,10 +542,12 @@ test("current-head status failures are not cached as verified head-aware entries
 
   await app.init();
   assert.equal(checksFetches, 1);
+  assert.equal(app.getState().allSummaries[0].checks, "passing");
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
 
   await app.refresh(false);
   assert.equal(checksFetches, 2);
+  assert.equal(app.getState().allSummaries[0].checks, "passing");
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
 });
 

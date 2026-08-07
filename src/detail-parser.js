@@ -279,14 +279,16 @@ export function parseUnresolvedThreadCountDocument(doc) {
   return undefined;
 }
 
-export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
+export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN, expectedHeadSha = "") {
   const base = new URL(baseUrl, GITHUB_ORIGIN);
   const baseOrigin = base.origin;
   const baseMatch = base.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/);
   const expectedOwner = baseMatch?.[1] || "";
   const expectedRepo = baseMatch?.[2] || "";
   const expectedNumber = baseMatch?.[3] || "";
-  const currentHeadSha = doc.querySelector('input[name="head_sha"]')?.getAttribute("value")?.trim() || "";
+  const currentHeadSha = String(expectedHeadSha || "").trim() ||
+    doc.querySelector('input[name="head_sha"]')?.getAttribute("value")?.trim() ||
+    "";
   const candidateAttributes = [
     "data-status-details-url",
     "data-checks-status-url",
@@ -333,7 +335,10 @@ export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
   const preferredCurrentOid = currentHeadSha
     ? candidates.find((candidate) => candidate.type === "commit_status_icon" && candidate.oid === currentHeadSha)
     : null;
-  return preferredCurrentOid?.url || candidates[0]?.url || null;
+  if (currentHeadSha) {
+    return preferredCurrentOid?.url || null;
+  }
+  return candidates[0]?.url || null;
 }
 
 export function mergeNativeDetails(primary, fallback) {

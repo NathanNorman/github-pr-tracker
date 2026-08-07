@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.1
+// @version      1.7.2
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.1
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.2
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -21,7 +21,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 7;
+  var DETAIL_PARSER_VERSION = 8;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -355,14 +355,14 @@
     }
     return void 0;
   }
-  function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
+  function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN, expectedHeadSha = "") {
     const base = new URL(baseUrl, GITHUB_ORIGIN);
     const baseOrigin = base.origin;
     const baseMatch = base.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/);
     const expectedOwner = baseMatch?.[1] || "";
     const expectedRepo = baseMatch?.[2] || "";
     const expectedNumber = baseMatch?.[3] || "";
-    const currentHeadSha = doc.querySelector('input[name="head_sha"]')?.getAttribute("value")?.trim() || "";
+    const currentHeadSha = String(expectedHeadSha || "").trim() || doc.querySelector('input[name="head_sha"]')?.getAttribute("value")?.trim() || "";
     const candidateAttributes = [
       "data-status-details-url",
       "data-checks-status-url",
@@ -404,7 +404,10 @@
       }
     }
     const preferredCurrentOid = currentHeadSha ? candidates.find((candidate) => candidate.type === "commit_status_icon" && candidate.oid === currentHeadSha) : null;
-    return preferredCurrentOid?.url || candidates[0]?.url || null;
+    if (currentHeadSha) {
+      return preferredCurrentOid?.url || null;
+    }
+    return candidates[0]?.url || null;
   }
   function mergeNativeDetails(primary, fallback) {
     const left = primary || {};
@@ -1186,7 +1189,9 @@
     const checkRoots = [...row.querySelectorAll(
       '[data-checks-state], .commit-build-statuses, [aria-label*="check" i], img[alt*="check" i], [class~="status-check" i], [class~="check-status" i]'
     )];
-    const checkRoot = checkRoots.at(-1);
+    const checkRoot = checkRoots.filter(
+      (node) => node.matches("[data-checks-state]") || node.matches(".commit-build-statuses") && node.querySelector('summary, [aria-label*="check" i], img[alt*="check" i]')
+    ).at(-1) || checkRoots.at(-1);
     const checkNodes = checkRoot ? [
       checkRoot,
       ...checkRoot.querySelectorAll(
@@ -3690,38 +3695,23 @@ select {
       const prDocument = parser(html, summary.url);
       let detail = parsePrDetailDocument(prDocument, summary.url);
       let verifiedHeadAwareChecks = false;
-      const shouldFetchCurrentHeadChecks = Boolean(summary.checksUrl);
-      const needsDeferred = shouldFetchCurrentHeadChecks || detail.review === "unknown" || detail.checks === "unknown" || detail.merge === "unknown";
-      if (needsDeferred) {
-        const deferredUrl = shouldFetchCurrentHeadChecks ? summary.checksUrl : findDeferredStatusEndpoint(prDocument, summary.url);
-        if (deferredUrl && isSameOriginGitHubUrl(deferredUrl)) {
-          try {
-            const response = await fetchImpl(deferredUrl, {
-              credentials: "include",
-              headers: {
-                Accept: "application/json,text/html"
-              }
-            });
-            if (response.ok) {
-              const contentType = response.headers?.get?.("content-type") || "";
-              let deferredDetail = null;
-              if (contentType.includes("application/json")) {
-                deferredDetail = parsePrDetailPayload(await response.json());
-              } else {
-                const body = await response.text();
-                deferredDetail = parsePrDetailDocument(parser(body, deferredUrl), deferredUrl);
-                if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
-                  deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
-                }
-              }
-              detail = shouldFetchCurrentHeadChecks ? mergeDeferredChecks(detail, deferredDetail) : mergeNativeDetails(detail, deferredDetail);
-              if (shouldFetchCurrentHeadChecks && deferredDetail?.checks && deferredDetail.checks !== "unknown") {
-                verifiedHeadAwareChecks = true;
-              }
-            }
-          } catch {
+      const hasCurrentHead = Boolean(summary.headSha);
+      if (hasCurrentHead) {
+        detail = { ...detail, checks: "unknown" };
+        const currentIconUrl = findDeferredStatusEndpoint(prDocument, summary.url, summary.headSha);
+        const currentHeadUrls = [...new Set([currentIconUrl, summary.checksUrl].filter(Boolean))];
+        for (const deferredUrl of currentHeadUrls) {
+          const deferredDetail = await fetchDeferredDetail(deferredUrl, { preferHtml: true });
+          if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+            detail = mergeDeferredChecks(detail, deferredDetail);
+            verifiedHeadAwareChecks = true;
+            break;
           }
         }
+      } else if (detail.review === "unknown" || detail.checks === "unknown" || detail.merge === "unknown") {
+        const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
+        const deferredDetail = await fetchDeferredDetail(deferredUrl);
+        detail = mergeNativeDetails(detail, deferredDetail);
       }
       let unresolvedThreads = parseUnresolvedThreadCountDocument(prDocument);
       if (!Number.isInteger(unresolvedThreads)) {
@@ -3737,6 +3727,34 @@ select {
         detail: mergedDetail,
         cacheEntry: buildDetailCacheEntry(summary, mergedDetail, verifiedHeadAwareChecks)
       };
+    }
+    async function fetchDeferredDetail(deferredUrl, { preferHtml = false } = {}) {
+      if (!deferredUrl || !isSameOriginGitHubUrl(deferredUrl)) {
+        return null;
+      }
+      try {
+        const response = await fetchImpl(deferredUrl, {
+          credentials: "include",
+          headers: {
+            Accept: preferHtml ? "text/html,application/xhtml+xml" : "application/json,text/html"
+          }
+        });
+        if (!response.ok) {
+          return null;
+        }
+        const contentType = response.headers?.get?.("content-type") || "";
+        if (contentType.includes("application/json")) {
+          return parsePrDetailPayload(await response.json());
+        }
+        const body = await response.text();
+        let deferredDetail = parsePrDetailDocument(parser(body, deferredUrl), deferredUrl);
+        if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
+          deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
+        }
+        return deferredDetail;
+      } catch {
+        return null;
+      }
     }
     async function removeOpenSummary(key) {
       const latest = await storage.load();

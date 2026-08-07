@@ -57,6 +57,24 @@ test("parsePullListDocument reads Toast Enterprise review and check signals", ()
   assert.equal(result.items[0].checksUrl, `https://github.toasttab.com/acme/api/commit/${sha}/status-details?popover=true`);
 });
 
+test("parsePullListDocument trusts the green rollup wrapper when successful checks exclude skipped checks", () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const doc = parseHtml(`
+    <div class="Box-row">
+      <a href="/acme/api/pull/12">Improve the API</a>
+      <details
+        class="commit-build-statuses"
+        data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"
+      >
+        <summary class="color-fg-success">
+          <svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg>
+        </summary>
+      </details>
+    </div>
+  `);
+  assert.equal(parsePullListDocument(doc).items[0].checks, "passing");
+});
+
 test("parsePullListDocument rejects mismatched data-head-sha against the validated status-details url", () => {
   const sha = "1234567890abcdef1234567890abcdef12345678";
   const doc = parseHtml(`
@@ -406,6 +424,18 @@ test("findDeferredStatusEndpoint scopes to the current PR and prefers the curren
   assert.equal(
     findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"),
     "https://github.toasttab.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
+  );
+});
+
+test("findDeferredStatusEndpoint uses the supplied head when merge-form metadata is absent", () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const doc = parseHtml(`
+    <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=old111"></div>
+    <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=${sha}"></div>
+  `, "https://github.toasttab.com/acme/api/pull/12");
+  assert.equal(
+    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12", sha),
+    `https://github.toasttab.com/acme/api/pull/12/partials/commit_status_icon?oid=${sha}`
   );
 });
 

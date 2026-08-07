@@ -311,47 +311,31 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     const prDocument = parser(html, summary.url);
     let detail = parsePrDetailDocument(prDocument, summary.url);
     let verifiedHeadAwareChecks = false;
-    const shouldFetchCurrentHeadChecks = Boolean(summary.checksUrl);
-    const needsDeferred =
-      shouldFetchCurrentHeadChecks ||
-      detail.review === "unknown" ||
-      detail.checks === "unknown" ||
-      detail.merge === "unknown";
-    if (needsDeferred) {
-      const deferredUrl = shouldFetchCurrentHeadChecks
-        ? summary.checksUrl
-        : findDeferredStatusEndpoint(prDocument, summary.url);
-      if (deferredUrl && isSameOriginGitHubUrl(deferredUrl)) {
-        try {
-          const response = await fetchImpl(deferredUrl, {
-            credentials: "include",
-            headers: {
-              Accept: "application/json,text/html"
-            }
-          });
-          if (response.ok) {
-            const contentType = response.headers?.get?.("content-type") || "";
-            let deferredDetail = null;
-            if (contentType.includes("application/json")) {
-              deferredDetail = parsePrDetailPayload(await response.json());
-            } else {
-              const body = await response.text();
-              deferredDetail = parsePrDetailDocument(parser(body, deferredUrl), deferredUrl);
-              if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
-                deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
-              }
-            }
-            detail = shouldFetchCurrentHeadChecks
-              ? mergeDeferredChecks(detail, deferredDetail)
-              : mergeNativeDetails(detail, deferredDetail);
-            if (shouldFetchCurrentHeadChecks && deferredDetail?.checks && deferredDetail.checks !== "unknown") {
-              verifiedHeadAwareChecks = true;
-            }
-          }
-        } catch {
-          // Keep the best detail already parsed from the pull request page.
+    const hasCurrentHead = Boolean(summary.headSha);
+    if (hasCurrentHead) {
+      // Main pull-request HTML can retain an older rollup. Once the authored
+      // list identifies the head commit, only head-scoped signals may supply
+      // checks. If they are unavailable, fall back to the current list row or
+      // unknown instead of rendering a stale failure.
+      detail = { ...detail, checks: "unknown" };
+      const currentIconUrl = findDeferredStatusEndpoint(prDocument, summary.url, summary.headSha);
+      const currentHeadUrls = [...new Set([currentIconUrl, summary.checksUrl].filter(Boolean))];
+      for (const deferredUrl of currentHeadUrls) {
+        const deferredDetail = await fetchDeferredDetail(deferredUrl, { preferHtml: true });
+        if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+          detail = mergeDeferredChecks(detail, deferredDetail);
+          verifiedHeadAwareChecks = true;
+          break;
         }
       }
+    } else if (
+      detail.review === "unknown" ||
+      detail.checks === "unknown" ||
+      detail.merge === "unknown"
+    ) {
+      const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
+      const deferredDetail = await fetchDeferredDetail(deferredUrl);
+      detail = mergeNativeDetails(detail, deferredDetail);
     }
 
     let unresolvedThreads = parseUnresolvedThreadCountDocument(prDocument);
@@ -369,6 +353,35 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       detail: mergedDetail,
       cacheEntry: buildDetailCacheEntry(summary, mergedDetail, verifiedHeadAwareChecks)
     };
+  }
+
+  async function fetchDeferredDetail(deferredUrl, { preferHtml = false } = {}) {
+    if (!deferredUrl || !isSameOriginGitHubUrl(deferredUrl)) {
+      return null;
+    }
+    try {
+      const response = await fetchImpl(deferredUrl, {
+        credentials: "include",
+        headers: {
+          Accept: preferHtml ? "text/html,application/xhtml+xml" : "application/json,text/html"
+        }
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const contentType = response.headers?.get?.("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return parsePrDetailPayload(await response.json());
+      }
+      const body = await response.text();
+      let deferredDetail = parsePrDetailDocument(parser(body, deferredUrl), deferredUrl);
+      if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
+        deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
+      }
+      return deferredDetail;
+    } catch {
+      return null;
+    }
   }
 
   async function removeOpenSummary(key) {
