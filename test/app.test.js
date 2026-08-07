@@ -88,6 +88,16 @@ async function waitFor(predicate, message = "condition") {
   assert.fail(`Timed out waiting for ${message}.`);
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 test("handleRoute only auto-refreshes once per route entry", async () => {
   const dom = makeDom();
   const storage = makeStorage({ accountLogin: "octocat", records: {}, openListCache: { updatedAt: 1, items: [] }, detailCache: {} });
@@ -154,6 +164,351 @@ test("search and notes keep focus and value across updates", async () => {
     assert.equal(shadow.activeElement, notes);
     assert.equal(notes.value, value);
   }
+});
+
+test("drawer note and private-label drafts keep the same focused field across storage rerenders", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([{ href: "/acme/api/pull/1", title: "Fix CI", draft: false }])
+          : "<html><body></body></html>"
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  const removedEditors = new Set();
+  const observer = new dom.window.MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.removedNodes) {
+        if (!(node instanceof dom.window.Element)) {
+          continue;
+        }
+        for (const editor of node.matches?.("[data-focus-id]") ? [node] : node.querySelectorAll?.("[data-focus-id]") || []) {
+          removedEditors.add(editor.getAttribute("data-focus-id"));
+        }
+      }
+    }
+  });
+  observer.observe(shadow.querySelector(".drawer"), { childList: true, subtree: true });
+
+  const notes = shadow.querySelector('.drawer textarea[data-focus-id="notes"]');
+  let notesBlurCount = 0;
+  notes.addEventListener("blur", () => {
+    notesBlurCount += 1;
+  });
+  notes.focus();
+  for (const value of ["a", "ab"]) {
+    notes.value = value;
+    notes.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    await storage.importEnvelope({
+      accountLogin: "octocat",
+      records: {
+        "acme/api#1": { status: "waiting", blockedBy: "", notes: "", tags: [], modifiedAt: 2 }
+      }
+    });
+    assert.equal(shadow.querySelector('.drawer textarea[data-focus-id="notes"]'), notes);
+    assert.equal(shadow.activeElement, notes);
+    assert.equal(notes.isConnected, true);
+    assert.equal(notes.value, value);
+  }
+  assert.equal(notesBlurCount, 0);
+
+  assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "");
+  await app.flushPending();
+  assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "ab");
+
+  const tagInput = shadow.querySelector('[aria-label="Private label name"]');
+  let tagBlurCount = 0;
+  tagInput.addEventListener("blur", () => {
+    tagBlurCount += 1;
+  });
+  tagInput.focus();
+  for (const value of ["u", "ur"]) {
+    tagInput.value = value;
+    tagInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    await storage.importEnvelope({
+      accountLogin: "octocat",
+      records: {
+        "acme/api#1": { status: "waiting", blockedBy: "", notes: "", tags: [], modifiedAt: 3 }
+      }
+    });
+    assert.equal(shadow.querySelector('[aria-label="Private label name"]'), tagInput);
+    assert.equal(shadow.activeElement, tagInput);
+    assert.equal(tagInput.isConnected, true);
+    assert.equal(tagInput.value, value);
+  }
+  assert.equal(tagBlurCount, 0);
+
+  const tagForm = shadow.querySelector(".tag-form");
+  tagForm.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  assert.deepEqual(storage.getEnvelope().records["acme/api#1"].tags, [{ name: "ur", color: "gray" }]);
+  assert.equal(tagInput.value, "");
+  assert.deepEqual([...removedEditors], []);
+  observer.disconnect();
+});
+
+test("note saves drain safely when a second edit arrives during an in-flight write", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+    },
+    detailCache: {}
+  });
+  const writes = [];
+  const firstWrite = createDeferred();
+  const originalUpsert = storage.upsertRecord;
+  storage.upsertRecord = async (key, patch, modifiedAt) => {
+    writes.push(patch.notes);
+    if (writes.length === 1) {
+      await firstWrite.promise;
+    }
+    return originalUpsert(key, patch, modifiedAt);
+  };
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
+          : "<html><body></body></html>"
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  const notes = shadow.querySelector('.drawer textarea[data-focus-id="notes"]');
+
+  notes.value = "a";
+  notes.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  notes.dispatchEvent(new dom.window.Event("blur", { bubbles: true }));
+  await waitFor(() => writes.length === 1, "first write start");
+
+  notes.value = "ab";
+  notes.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  firstWrite.resolve();
+
+  await app.flushPending();
+  assert.deepEqual(writes, ["a", "ab"]);
+  assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "ab");
+});
+
+test("detached stale drawer editors keep targeting their original PR key", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
+      "acme/api#2": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
+      ]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([
+              { href: "/acme/api/pull/1", title: "One", draft: false },
+              { href: "/acme/api/pull/2", title: "Two", draft: false }
+            ])
+          : "<html><body></body></html>"
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const rows = shadow.querySelectorAll(".pr-row-select");
+  rows[0].click();
+  const notesA = shadow.querySelector('.drawer textarea[data-focus-id="notes"]');
+
+  rows[1].click();
+  const notesB = shadow.querySelector('.drawer textarea[data-focus-id="notes"]');
+  notesB.value = "beta";
+  notesB.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+
+  notesA.value = "alpha";
+  notesA.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+
+  assert.equal(shadow.querySelector('.drawer textarea[data-focus-id="notes"]').value, "beta");
+  assert.equal(app.getState().records["acme/api#2"].notes, "beta");
+  assert.equal(app.getState().records["acme/api#1"].notes, "alpha");
+
+  rows[0].click();
+  shadow.querySelector(".close-action").click();
+  const closeCommentA = shadow.querySelector(".close-comment");
+  const cancelCloseA = shadow.querySelector(".close-prompt .action-btn:not(.close-confirm)");
+  closeCommentA.value = "alpha";
+  closeCommentA.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+
+  rows[1].click();
+  shadow.querySelector(".close-action").click();
+  const closeCommentB = shadow.querySelector(".close-comment");
+  closeCommentB.value = "beta";
+  closeCommentB.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+
+  closeCommentA.value = "alpha-late";
+  closeCommentA.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  cancelCloseA.click();
+  await storage.importEnvelope({ accountLogin: "octocat", records: {} });
+  assert.equal(shadow.querySelector(".close-comment"), closeCommentB);
+  assert.equal(closeCommentB.value, "beta");
+
+  await app.flushPending();
+  assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "alpha");
+  assert.equal(storage.getEnvelope().records["acme/api#2"].notes, "beta");
+});
+
+test("failed note persistence keeps the draft visible and can retry later", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+    },
+    detailCache: {}
+  });
+  let failOnce = true;
+  const originalUpsert = storage.upsertRecord;
+  storage.upsertRecord = async (key, patch, modifiedAt) => {
+    if (failOnce) {
+      failOnce = false;
+      throw new Error("disk full");
+    }
+    return originalUpsert(key, patch, modifiedAt);
+  };
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
+          : "<html><body></body></html>"
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  const notes = shadow.querySelector('.drawer textarea[data-focus-id="notes"]');
+  notes.value = "draft";
+  notes.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+
+  await assert.rejects(() => app.flushPending(), /disk full/);
+  await storage.importEnvelope({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "waiting", blockedBy: "", notes: "", tags: [], modifiedAt: 2 }
+    }
+  });
+
+  assert.equal(shadow.querySelector('.drawer textarea[data-focus-id="notes"]').value, "draft");
+  assert.equal(shadow.querySelector(".save-state").textContent, "Error: disk full");
+
+  await app.flushPending();
+  assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "draft");
+  assert.equal(shadow.querySelector(".save-state").textContent, "Saved");
+});
+
+test("a completed save for another PR does not clear the selected PR saving indicator", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
+      "acme/api#2": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
+      ]
+    },
+    detailCache: {}
+  });
+  const gateA = createDeferred();
+  const originalUpsert = storage.upsertRecord;
+  storage.upsertRecord = async (key, patch, modifiedAt) => {
+    if (key === "acme/api#1") {
+      await gateA.promise;
+    }
+    return originalUpsert(key, patch, modifiedAt);
+  };
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([
+              { href: "/acme/api/pull/1", title: "One", draft: false },
+              { href: "/acme/api/pull/2", title: "Two", draft: false }
+            ])
+          : "<html><body></body></html>"
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const rows = shadow.querySelectorAll(".pr-row-select");
+
+  rows[0].click();
+  let notes = shadow.querySelector('.drawer textarea[data-focus-id="notes"]');
+  notes.value = "alpha";
+  notes.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  notes.dispatchEvent(new dom.window.Event("blur", { bubbles: true }));
+
+  rows[1].click();
+  notes = shadow.querySelector('.drawer textarea[data-focus-id="notes"]');
+  notes.value = "beta";
+  notes.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.equal(shadow.querySelector(".save-state").textContent, "Saving…");
+
+  gateA.resolve();
+  await waitFor(() => storage.getEnvelope().records["acme/api#1"].notes === "alpha", "A save completion");
+  assert.equal(shadow.querySelector(".save-state").textContent, "Saving…");
+
+  await app.flushPending();
+  assert.equal(storage.getEnvelope().records["acme/api#2"].notes, "beta");
+  assert.equal(shadow.querySelector(".save-state").textContent, "Saved");
 });
 
 test("pending edits stay keyed to the correct PR and flush on close", async () => {

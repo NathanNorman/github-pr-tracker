@@ -40,7 +40,9 @@ async function bootstrap() {
   observer.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("popstate", rerun);
   window.addEventListener("hashchange", rerun);
-  window.addEventListener("beforeunload", () => app.flushPending?.());
+  window.addEventListener("beforeunload", () => {
+    void app.flushPending?.().catch(() => {});
+  });
   document.addEventListener("pjax:end", rerun);
 }
 

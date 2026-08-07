@@ -115,7 +115,7 @@ test("built userscript renders AAP-490 passing from its exact current-head icon 
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.7\.2$/m);
+  assert.match(source, /^\/\/ @version\s+1\.7\.3$/m);
   window.eval(source);
   await waitFor(
     () => envelope.detailCache["toasttab/toast-labor#704"]?.detail?.checks === "passing",
@@ -133,6 +133,101 @@ test("built userscript renders AAP-490 passing from its exact current-head icon 
   assert.equal(requests.some(({ url }) => url === statusUrl), false);
   assert.equal(requests.find(({ url }) => url === iconUrl)?.accept, "text/html,application/xhtml+xml");
   assert.deepEqual(errors, []);
+});
+
+test("built userscript keeps note and private-label editors mounted across remote storage rerenders", async () => {
+  const source = await readFile(new URL("../dist/github-pr-tracker.user.js", import.meta.url), "utf8");
+  const prUrl = "https://github.toasttab.com/acme/api/pull/1";
+  const dom = new JSDOM(
+    '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><main><div>Native pulls</div></main></body></html>',
+    {
+      url: "https://github.toasttab.com/pulls#pr-tracker",
+      pretendToBeVisual: true,
+      runScripts: "outside-only"
+    }
+  );
+  const { window } = dom;
+  const errors = [];
+  let remoteStorageListener = null;
+  let envelope = {
+    schemaVersion: 1,
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: { updatedAt: 0, items: [] },
+    detailCache: {}
+  };
+
+  window.console.error = (...args) => errors.push(args.map(String).join(" "));
+  window.GM_getValue = async () => structuredClone(envelope);
+  window.GM_setValue = async (_key, value) => {
+    envelope = structuredClone(value);
+  };
+  window.GM_addValueChangeListener = (_key, listener) => {
+    remoteStorageListener = listener;
+    return 1;
+  };
+  window.GM_removeValueChangeListener = () => {};
+  window.fetch = async (rawUrl) => {
+    const url = new URL(String(rawUrl), "https://github.toasttab.com");
+    if (url.pathname === "/pulls" && url.searchParams.has("q")) {
+      return response('<div data-issue-and-pr-hovercards-enabled="true"><a data-hovercard-type="pull_request" href="/acme/api/pull/1">Fix input focus</a></div>');
+    }
+    if (url.href === prUrl) {
+      return response("<html><body></body></html>");
+    }
+    if (url.href === `${prUrl}/files`) {
+      return response('<div class="js-diff-progressive-container"></div>');
+    }
+    throw new Error(`Unexpected request: ${url.href}`);
+  };
+
+  assert.match(source, /^\/\/ @version\s+1\.7\.3$/m);
+  window.eval(source);
+  await waitFor(
+    () => window.document.querySelector("#tm-pr-tracker-root")?.shadowRoot?.querySelector(".pr-row-select"),
+    "tracker row"
+  );
+
+  const shadow = window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  const notes = shadow.querySelector('textarea[data-focus-id="notes"]');
+  const tagInput = shadow.querySelector('[aria-label="Private label name"]');
+  const removedEditors = [];
+  const observer = new window.MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.removedNodes) {
+        if (node === notes || node === tagInput || node.contains?.(notes) || node.contains?.(tagInput)) {
+          removedEditors.push(node);
+        }
+      }
+    }
+  });
+  observer.observe(shadow.querySelector(".drawer"), { childList: true, subtree: true });
+
+  notes.focus();
+  notes.value = "ab";
+  notes.setSelectionRange(2, 2);
+  notes.dispatchEvent(new window.Event("input", { bubbles: true }));
+  const remoteEnvelope = structuredClone(envelope);
+  remoteEnvelope.records["acme/api#1"].status = "waiting";
+  remoteStorageListener("tracker", envelope, remoteEnvelope, true);
+  assert.equal(shadow.querySelector('textarea[data-focus-id="notes"]'), notes);
+  assert.equal(shadow.activeElement, notes);
+  assert.equal(notes.value, "ab");
+  assert.equal(notes.selectionStart, 2);
+
+  tagInput.focus();
+  tagInput.value = "urgent";
+  tagInput.dispatchEvent(new window.Event("input", { bubbles: true }));
+  remoteStorageListener("tracker", envelope, remoteEnvelope, true);
+  assert.equal(shadow.querySelector('[aria-label="Private label name"]'), tagInput);
+  assert.equal(shadow.activeElement, tagInput);
+  assert.equal(tagInput.value, "urgent");
+  assert.deepEqual(removedEditors, []);
+  assert.deepEqual(errors, []);
+  observer.disconnect();
 });
 
 function response(body, ok = true, status = 200) {

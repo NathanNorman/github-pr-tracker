@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.2
+// @version      1.7.3
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.2
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.3
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -2585,7 +2585,7 @@ select {
     let currentState = null;
     let currentSelectedKey = null;
     let closePromptKey = null;
-    let closeComment = "";
+    let drawerView = null;
     const disclosureMenus = [backupMenu, filterMenu, sortMenu];
     function dismissDisclosures(path = []) {
       for (const menu of disclosureMenus) {
@@ -2599,7 +2599,11 @@ select {
       if (!key) {
         return;
       }
-      await flushPending(key);
+      try {
+        await flushPending(key);
+      } catch {
+        return;
+      }
       handlers.onSelect(null);
       if (restoreFocus2 && focusedBeforeDrawer instanceof HTMLElement) {
         focusedBeforeDrawer.focus();
@@ -2918,21 +2922,75 @@ select {
       shell.classList.toggle("has-drawer", Boolean(state.selectedKey));
       drawer.hidden = !state.selectedKey;
       if (!state.selectedKey) {
-        void flushPending(currentSelectedKey);
+        void flushPending(currentSelectedKey).catch(() => {
+        });
         currentSelectedKey = null;
         closePromptKey = null;
-        closeComment = "";
+        drawerView = null;
         drawer.textContent = "";
+        updateSaveState();
         return;
       }
       if (closePromptKey && closePromptKey !== state.selectedKey) {
         closePromptKey = null;
-        closeComment = "";
       }
       const summary = state.allSummaries.find((item) => item.key === state.selectedKey) || state.filteredSummaries.find((item) => item.key === state.selectedKey);
-      const record = state.records[state.selectedKey] || DEFAULT_RECORD;
+      const record = getDrawerRecord(state.selectedKey, state.records[state.selectedKey] || DEFAULT_RECORD);
       currentSelectedKey = state.selectedKey;
-      drawer.textContent = "";
+      if (!drawerView || drawerView.key !== state.selectedKey) {
+        drawerView = createDrawerView(state.selectedKey);
+        drawer.replaceChildren(...drawerView.nodes);
+      }
+      const actionPending = Boolean(state.prAction?.pending);
+      const selectedActionPending = actionPending && state.prAction.key === state.selectedKey;
+      const canMerge = summary?.merge === "clean" && !summary?.draft;
+      drawerView.identityTitle.textContent = summary?.title || state.selectedKey;
+      drawerView.identityRepo.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
+      drawerView.link.href = summary?.url || "#";
+      drawerView.mergeButton.textContent = selectedActionPending && state.prAction.type === "merge" ? "Merging\u2026" : "Squash & merge";
+      drawerView.mergeButton.disabled = actionPending;
+      if (canMerge) {
+        if (!drawerView.mergeButton.isConnected) {
+          drawerView.prActionButtons.prepend(drawerView.mergeButton);
+        }
+      } else {
+        drawerView.mergeButton.remove();
+      }
+      drawerView.closePrButton.textContent = selectedActionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close PR";
+      drawerView.closePrButton.disabled = actionPending;
+      if (closePromptKey === state.selectedKey) {
+        if (!drawerView.closePrompt.isConnected) {
+          drawerView.prActions.insertBefore(drawerView.closePrompt, drawerView.actionError);
+        }
+        syncInputValue(drawerView.closeCommentInput, drawerView.closeComment);
+      } else {
+        drawerView.closePrompt.remove();
+      }
+      drawerView.cancelClose.disabled = actionPending;
+      drawerView.confirmClose.textContent = selectedActionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close pull request";
+      drawerView.confirmClose.disabled = actionPending;
+      const actionError = state.prAction?.key === state.selectedKey ? state.prAction.error : "";
+      drawerView.actionError.hidden = !actionError;
+      drawerView.actionError.textContent = actionError || "";
+      syncSelectValue(drawerView.statusSelect, record.status);
+      drawerView.blockerField.hidden = record.status !== "blocked";
+      syncInputValue(drawerView.blockerInput, record.blockedBy);
+      drawerView.existingTags.textContent = "";
+      for (const tag of record.tags) {
+        const pill = makeTagButton(tag, {
+          ariaLabel: `Remove tag ${tag.name}`,
+          onClick() {
+            handlers.onRemoveTag(state.selectedKey, tag.name);
+          }
+        });
+        pill.title = "Remove private tag";
+        drawerView.existingTags.append(pill);
+      }
+      syncInputValue(drawerView.notesInput, record.notes);
+      updateSaveState();
+    }
+    function createDrawerView(selectedKey) {
+      const view = { key: selectedKey };
       const header = doc.createElement("div");
       header.className = "drawer-header";
       const headerText = doc.createElement("div");
@@ -2953,10 +3011,8 @@ select {
       identity.className = "drawer-identity";
       const identityTitle = doc.createElement("div");
       identityTitle.className = "title";
-      identityTitle.textContent = summary?.title || state.selectedKey;
       const identityRepo = doc.createElement("div");
       identityRepo.className = "repo";
-      identityRepo.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
       identity.append(identityTitle, identityRepo);
       const prActions = doc.createElement("section");
       prActions.className = "pr-actions";
@@ -2965,91 +3021,79 @@ select {
       prActionsLabel.textContent = "GitHub actions";
       const prActionButtons = doc.createElement("div");
       prActionButtons.className = "pr-action-buttons";
-      const actionPending = Boolean(state.prAction?.pending);
-      const selectedActionPending = actionPending && state.prAction.key === state.selectedKey;
-      if (summary?.merge === "clean" && !summary.draft) {
-        const mergeButton = makeActionButton(
-          selectedActionPending && state.prAction.type === "merge" ? "Merging\u2026" : "Squash & merge",
-          () => void handlers.onMerge(state.selectedKey),
-          "action-btn merge-action"
-        );
-        mergeButton.disabled = actionPending;
-        prActionButtons.append(mergeButton);
-      }
-      const closePrButton = makeActionButton(
-        selectedActionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close PR",
-        () => {
-          closePromptKey = state.selectedKey;
-          closeComment = "";
-          renderDrawer(currentState);
-          drawer.querySelector(".close-comment")?.focus();
-        },
-        "action-btn close-action"
-      );
-      closePrButton.disabled = actionPending;
-      prActionButtons.append(closePrButton);
+      const mergeButton = makeActionButton("Squash & merge", () => void handlers.onMerge(selectedKey), "action-btn merge-action");
+      const closePrButton = makeActionButton("Close PR", () => {
+        if (currentState?.selectedKey !== selectedKey) {
+          return;
+        }
+        closePromptKey = selectedKey;
+        view.closeComment = "";
+        renderDrawer(currentState);
+        view.closeCommentInput?.focus();
+      }, "action-btn close-action");
+      prActionButtons.append(mergeButton, closePrButton);
       prActions.append(prActionsLabel, prActionButtons);
-      if (closePromptKey === state.selectedKey) {
-        const closePrompt = doc.createElement("div");
-        closePrompt.className = "close-prompt";
-        const closePromptLabel = doc.createElement("label");
-        closePromptLabel.className = "field-label";
-        closePromptLabel.textContent = "Optional closing comment";
-        const closeCommentInput = doc.createElement("textarea");
-        closeCommentInput.className = "close-comment";
-        closeCommentInput.rows = 3;
-        closeCommentInput.placeholder = "Add context before closing\u2026";
-        closeCommentInput.value = closeComment;
-        closeCommentInput.addEventListener("input", () => {
-          closeComment = closeCommentInput.value;
-        });
-        closePromptLabel.append(closeCommentInput);
-        const closePromptButtons = doc.createElement("div");
-        closePromptButtons.className = "close-prompt-buttons";
-        const cancelClose = makeActionButton("Cancel", () => {
-          closePromptKey = null;
-          closeComment = "";
-          renderDrawer(currentState);
-        }, "action-btn");
-        const confirmClose = makeActionButton(
-          selectedActionPending && state.prAction.type === "close" ? "Closing\u2026" : "Close pull request",
-          () => void handlers.onClosePullRequest(state.selectedKey, closeComment),
-          "action-btn close-confirm"
-        );
-        cancelClose.disabled = actionPending;
-        confirmClose.disabled = actionPending;
-        closePromptButtons.append(cancelClose, confirmClose);
-        closePrompt.append(closePromptLabel, closePromptButtons);
-        prActions.append(closePrompt);
-      }
-      if (state.prAction?.key === state.selectedKey && state.prAction.error) {
-        const actionError = doc.createElement("div");
-        actionError.className = "pr-action-error";
-        actionError.setAttribute("role", "alert");
-        actionError.textContent = state.prAction.error;
-        prActions.append(actionError);
-      }
+      const closePrompt = doc.createElement("div");
+      closePrompt.className = "close-prompt";
+      const closePromptLabel = doc.createElement("label");
+      closePromptLabel.className = "field-label";
+      closePromptLabel.textContent = "Optional closing comment";
+      const closeCommentInput = doc.createElement("textarea");
+      closeCommentInput.className = "close-comment";
+      closeCommentInput.rows = 3;
+      closeCommentInput.placeholder = "Add context before closing\u2026";
+      closeCommentInput.addEventListener("input", () => {
+        if (currentState?.selectedKey === selectedKey) {
+          view.closeComment = closeCommentInput.value;
+        }
+      });
+      closePromptLabel.append(closeCommentInput);
+      const closePromptButtons = doc.createElement("div");
+      closePromptButtons.className = "close-prompt-buttons";
+      const cancelClose = makeActionButton("Cancel", () => {
+        if (currentState?.selectedKey !== selectedKey) {
+          return;
+        }
+        closePromptKey = null;
+        view.closeComment = "";
+        renderDrawer(currentState);
+      }, "action-btn");
+      const confirmClose = makeActionButton(
+        "Close pull request",
+        () => {
+          if (currentState?.selectedKey === selectedKey) {
+            void handlers.onClosePullRequest(selectedKey, view.closeComment);
+          }
+        },
+        "action-btn close-confirm"
+      );
+      closePromptButtons.append(cancelClose, confirmClose);
+      closePrompt.append(closePromptLabel, closePromptButtons);
+      prActions.append(closePrompt);
+      const actionError = doc.createElement("div");
+      actionError.className = "pr-action-error";
+      actionError.setAttribute("role", "alert");
+      prActions.append(actionError);
       const statusField = makeField("My status");
-      const statusSelect = makeStatusSelect(record.status);
+      const statusSelect = makeStatusSelect(DEFAULT_RECORD.status);
       statusSelect.setAttribute("data-focus-id", "status");
+      statusSelect.addEventListener("change", () => {
+        queueSave(selectedKey, { status: statusSelect.value });
+        blockerField.hidden = statusSelect.value !== "blocked";
+        if (statusSelect.value === "blocked") {
+          view.blockerInput.focus();
+        }
+      });
+      statusField.append(statusSelect);
       const blockerField = makeField("Blocked by");
       const blockerInput = doc.createElement("input");
       blockerInput.type = "text";
       blockerInput.placeholder = "Person, team, decision, or dependency";
-      blockerInput.value = record.blockedBy;
-      blockerField.hidden = record.status !== "blocked";
       blockerInput.setAttribute("data-focus-id", "blockedBy");
-      blockerInput.addEventListener("input", () => queueSave(state.selectedKey, { blockedBy: blockerInput.value }));
-      blockerInput.addEventListener("blur", () => void flushPending(state.selectedKey));
+      blockerInput.addEventListener("input", () => queueSave(selectedKey, { blockedBy: blockerInput.value }));
+      blockerInput.addEventListener("blur", () => void flushPending(selectedKey).catch(() => {
+      }));
       blockerField.append(blockerInput);
-      statusSelect.addEventListener("change", () => {
-        queueSave(state.selectedKey, { status: statusSelect.value });
-        blockerField.hidden = statusSelect.value !== "blocked";
-        if (statusSelect.value === "blocked") {
-          blockerInput.focus();
-        }
-      });
-      statusField.append(statusSelect);
       const tagsField = doc.createElement("div");
       tagsField.className = "field";
       const tagsLabel = doc.createElement("div");
@@ -3070,47 +3114,104 @@ select {
         option.textContent = color;
         colorSelect.append(option);
       }
-      const addTag = makeActionButton("Add", null, "action-btn");
-      addTag.type = "submit";
       tagForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        handlers.onAddTag(state.selectedKey, tagInput.value, colorSelect.value);
+        handlers.onAddTag(selectedKey, tagInput.value, colorSelect.value);
         tagInput.value = "";
       });
-      tagForm.append(tagInput, colorSelect, addTag);
+      tagForm.append(
+        tagInput,
+        colorSelect,
+        Object.assign(makeActionButton("Add", null, "action-btn"), { type: "submit" })
+      );
       const existingTags = doc.createElement("div");
       existingTags.className = "tags";
-      for (const tag of record.tags) {
-        const pill = makeTagButton(tag, {
-          ariaLabel: `Remove tag ${tag.name}`,
-          onClick() {
-            handlers.onRemoveTag(state.selectedKey, tag.name);
-          }
-        });
-        pill.title = "Remove private tag";
-        existingTags.append(pill);
-      }
       tagsField.append(tagsLabel, tagForm, existingTags);
       const notesField = makeField("My notes");
       const notesInput = doc.createElement("textarea");
       notesInput.rows = 7;
       notesInput.placeholder = "Context, next steps, reminders\u2026";
-      notesInput.value = record.notes;
       notesInput.setAttribute("data-focus-id", "notes");
-      notesInput.addEventListener("input", () => queueSave(state.selectedKey, { notes: notesInput.value }));
-      notesInput.addEventListener("blur", () => void flushPending(state.selectedKey));
+      notesInput.addEventListener("input", () => queueSave(selectedKey, { notes: notesInput.value }));
+      notesInput.addEventListener("blur", () => void flushPending(selectedKey).catch(() => {
+      }));
       notesField.append(notesInput);
       const footer = doc.createElement("div");
       footer.className = "drawer-footer";
       const link = doc.createElement("a");
       link.className = "link-btn";
-      link.href = summary?.url || "#";
       link.target = "_blank";
       link.rel = "noreferrer";
       link.textContent = "Open on GitHub \u2197";
-      saveState.textContent = state.saveState;
       footer.append(saveState, link);
-      drawer.append(header, identity, prActions, statusField, blockerField, tagsField, notesField, footer);
+      Object.assign(view, {
+        key: selectedKey,
+        closeComment: "",
+        nodes: [header, identity, prActions, statusField, blockerField, tagsField, notesField, footer],
+        identityTitle,
+        identityRepo,
+        prActions,
+        prActionButtons,
+        mergeButton,
+        closePrButton,
+        closePrompt,
+        closeCommentInput,
+        cancelClose,
+        confirmClose,
+        actionError,
+        statusSelect,
+        blockerField,
+        blockerInput,
+        tagInput,
+        colorSelect,
+        notesInput,
+        existingTags,
+        link
+      });
+      return view;
+    }
+    function getDrawerRecord(key, record) {
+      const draft = pendingSaves.get(key)?.draft;
+      return draft ? { ...record, ...draft } : record;
+    }
+    function syncInputValue(input, value) {
+      if (input.value !== value) {
+        input.value = value;
+      }
+    }
+    function syncSelectValue(select, value) {
+      if (select.value !== value) {
+        select.value = value;
+      }
+    }
+    function hasOwnValues(object) {
+      return Object.keys(object).length > 0;
+    }
+    function reconcileDraftAfterSave(entry, patch) {
+      for (const [field, value] of Object.entries(patch)) {
+        if (Object.is(entry.draft[field], value)) {
+          delete entry.draft[field];
+        }
+      }
+    }
+    function pruneSaveEntry(key, entry) {
+      if (entry.workerPromise || entry.inFlight || entry.debouncePending || hasOwnValues(entry.patch) || hasOwnValues(entry.draft) || entry.lastError) {
+        return;
+      }
+      pendingSaves.delete(key);
+    }
+    function updateSaveState() {
+      const selectedKey = currentState?.selectedKey;
+      const entry = selectedKey ? pendingSaves.get(selectedKey) : null;
+      if (entry?.lastError) {
+        saveState.textContent = `Error: ${entry.lastError.message}`;
+        return;
+      }
+      if (entry && (entry.inFlight || entry.debouncePending || hasOwnValues(entry.patch))) {
+        saveState.textContent = "Saving\u2026";
+        return;
+      }
+      saveState.textContent = "Saved";
     }
     function makeStatusSelect(selectedStatus) {
       const select = doc.createElement("select");
@@ -3154,22 +3255,14 @@ select {
       if (!key) {
         return;
       }
-      let entry = pendingSaves.get(key);
-      if (!entry) {
-        entry = {
-          patch: {},
-          running: Promise.resolve(),
-          scheduled: false,
-          debounced: debounce(() => {
-            void startSave(key);
-          }, SAVE_DEBOUNCE_MS)
-        };
-        pendingSaves.set(key, entry);
-      }
+      const entry = ensureSaveEntry(key);
       entry.patch = { ...entry.patch, ...patch };
+      entry.draft = { ...entry.draft, ...patch };
+      entry.lastError = null;
+      entry.debouncePending = true;
       handlers.onLocalPatch?.(key, patch);
-      setSaveState("Saving\u2026");
       entry.debounced();
+      updateSaveState();
     }
     async function flushPending(key = null) {
       if (key === null) {
@@ -3180,39 +3273,77 @@ select {
       if (!entry) {
         return;
       }
+      entry.debouncePending = false;
       entry.debounced.flush();
-      await entry.running;
-      if (!entry.scheduled && !Object.keys(entry.patch).length) {
-        pendingSaves.delete(key);
+      const worker = ensureSaveWorker(key);
+      if (worker) {
+        await worker;
       }
+      if (entry.lastError) {
+        throw entry.lastError;
+      }
+      pruneSaveEntry(key, entry);
+      updateSaveState();
     }
-    function startSave(key) {
+    function ensureSaveEntry(key) {
+      let entry = pendingSaves.get(key);
+      if (entry) {
+        return entry;
+      }
+      entry = {
+        patch: {},
+        draft: {},
+        workerPromise: null,
+        inFlight: false,
+        debouncePending: false,
+        lastError: null,
+        debounced: null
+      };
+      entry.debounced = debounce(() => {
+        entry.debouncePending = false;
+        updateSaveState();
+        void ensureSaveWorker(key).catch(() => {
+        });
+      }, SAVE_DEBOUNCE_MS);
+      pendingSaves.set(key, entry);
+      return entry;
+    }
+    function ensureSaveWorker(key) {
       const entry = pendingSaves.get(key);
       if (!entry) {
         return Promise.resolve();
       }
-      if (entry.scheduled || !Object.keys(entry.patch).length) {
-        return entry.running;
+      if (entry.workerPromise) {
+        return entry.workerPromise;
       }
-      entry.scheduled = true;
-      const patchToSave = { ...entry.patch };
-      entry.patch = {};
-      entry.running = entry.running.catch(() => {
-      }).then(async () => {
-        try {
-          await handlers.onEdit(key, patchToSave, now());
-        } finally {
-          entry.scheduled = false;
-          if (Object.keys(entry.patch).length) {
-            return startSave(key);
+      entry.workerPromise = (async () => {
+        while (hasOwnValues(entry.patch)) {
+          const patchToSave = { ...entry.patch };
+          entry.patch = {};
+          entry.inFlight = true;
+          entry.lastError = null;
+          updateSaveState();
+          try {
+            await handlers.onEdit(key, patchToSave, now());
+            reconcileDraftAfterSave(entry, patchToSave);
+          } catch (error) {
+            entry.patch = { ...patchToSave, ...entry.patch };
+            entry.lastError = error;
+            throw error;
+          } finally {
+            entry.inFlight = false;
+            updateSaveState();
           }
-          pendingSaves.delete(key);
         }
+      })().finally(() => {
+        entry.workerPromise = null;
+        pruneSaveEntry(key, entry);
+        updateSaveState();
       });
-      return entry.running;
+      return entry.workerPromise;
     }
-    function setSaveState(value) {
-      saveState.textContent = value;
+    function setSaveState() {
+      updateSaveState();
     }
     function captureFocus() {
       const active = shadow.activeElement;
@@ -3372,7 +3503,9 @@ select {
     function dismiss() {
       dismissDisclosures();
       closePromptKey = null;
-      closeComment = "";
+      if (drawerView) {
+        drawerView.closeComment = "";
+      }
     }
     return { render, shadow, flushPending, setSaveState, dismiss };
   }
@@ -3600,7 +3733,8 @@ select {
       layoutStyleSnapshots = [];
     }
     function unmount() {
-      void ui?.flushPending();
+      void ui?.flushPending().catch(() => {
+      });
       ui?.dismiss?.();
       if (host) {
         host.remove();
@@ -3774,7 +3908,13 @@ select {
       render();
     }
     async function exportData() {
-      await ui?.flushPending();
+      try {
+        await ui?.flushPending();
+      } catch (error) {
+        state.warning = `Export failed. ${error.message}`;
+        render();
+        return;
+      }
       const envelope = await storage.load();
       const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -3785,7 +3925,13 @@ select {
       URL.revokeObjectURL(url);
     }
     async function importFromText(rawText) {
-      await ui?.flushPending();
+      try {
+        await ui?.flushPending();
+      } catch (error) {
+        state.warning = `Import failed. ${error.message}`;
+        render();
+        return;
+      }
       try {
         const payload = JSON.parse(rawText);
         await storage.importEnvelope(payload);
@@ -3796,7 +3942,13 @@ select {
       render();
     }
     async function importData() {
-      await ui?.flushPending();
+      try {
+        await ui?.flushPending();
+      } catch (error) {
+        state.warning = `Import failed. ${error.message}`;
+        render();
+        return;
+      }
       const input = doc.createElement("input");
       input.type = "file";
       input.accept = "application/json";
@@ -3878,7 +4030,8 @@ select {
         },
         onSelect(key) {
           if (state.selectedKey && state.selectedKey !== key) {
-            void ui?.flushPending(state.selectedKey);
+            void ui?.flushPending(state.selectedKey)?.catch(() => {
+            });
           }
           state.selectedKey = key;
           if (state.prAction.key !== key && !state.prAction.pending) {
@@ -3934,12 +4087,7 @@ GitHub's default commit title will be kept and the commit message body will be e
           await refresh(true);
         },
         async onEdit(key, patch, timestamp) {
-          try {
-            await storage.upsertRecord(key, patch, timestamp);
-            setSaveState("Saved");
-          } catch (error) {
-            setSaveState(`Error: ${error.message}`);
-          }
+          await storage.upsertRecord(key, patch, timestamp);
         },
         async onQuickStatus(key, status) {
           const previous = state.records[key] || DEFAULT_RECORD;
@@ -4197,7 +4345,10 @@ GitHub's default commit title will be kept and the commit message body will be e
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", rerun);
     window.addEventListener("hashchange", rerun);
-    window.addEventListener("beforeunload", () => app.flushPending?.());
+    window.addEventListener("beforeunload", () => {
+      void app.flushPending?.().catch(() => {
+      });
+    });
     document.addEventListener("pjax:end", rerun);
   }
   bootstrap().catch((error) => {

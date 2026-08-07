@@ -202,7 +202,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
   }
 
   function unmount() {
-    void ui?.flushPending();
+    void ui?.flushPending().catch(() => {});
     ui?.dismiss?.();
     if (host) {
       host.remove();
@@ -403,7 +403,13 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
   }
 
   async function exportData() {
-    await ui?.flushPending();
+    try {
+      await ui?.flushPending();
+    } catch (error) {
+      state.warning = `Export failed. ${error.message}`;
+      render();
+      return;
+    }
     const envelope = await storage.load();
     const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -415,7 +421,13 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
   }
 
   async function importFromText(rawText) {
-    await ui?.flushPending();
+    try {
+      await ui?.flushPending();
+    } catch (error) {
+      state.warning = `Import failed. ${error.message}`;
+      render();
+      return;
+    }
     try {
       const payload = JSON.parse(rawText);
       await storage.importEnvelope(payload);
@@ -427,7 +439,13 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
   }
 
   async function importData() {
-    await ui?.flushPending();
+    try {
+      await ui?.flushPending();
+    } catch (error) {
+      state.warning = `Import failed. ${error.message}`;
+      render();
+      return;
+    }
     const input = doc.createElement("input");
     input.type = "file";
     input.accept = "application/json";
@@ -510,7 +528,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       },
       onSelect(key) {
         if (state.selectedKey && state.selectedKey !== key) {
-          void ui?.flushPending(state.selectedKey);
+          void ui?.flushPending(state.selectedKey)?.catch(() => {});
         }
         state.selectedKey = key;
         if (state.prAction.key !== key && !state.prAction.pending) {
@@ -564,12 +582,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         await refresh(true);
       },
       async onEdit(key, patch, timestamp) {
-        try {
-          await storage.upsertRecord(key, patch, timestamp);
-          setSaveState("Saved");
-        } catch (error) {
-          setSaveState(`Error: ${error.message}`);
-        }
+        await storage.upsertRecord(key, patch, timestamp);
       },
       async onQuickStatus(key, status) {
         const previous = state.records[key] || DEFAULT_RECORD;
