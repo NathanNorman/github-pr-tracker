@@ -133,7 +133,7 @@ function detailFromDom(doc) {
 
   const checkNodes = [
     ...doc.querySelectorAll(
-      '.commit-build-statuses summary, [data-deferred-details-content-url*="/status-details"], [data-mergeability-message], [aria-label*="checks" i], [data-checks-state]'
+      '.commit-build-statuses summary, [data-deferred-details-content-url*="/status-details"], [aria-label*="checks" i], [data-checks-state]'
     )
   ];
   const checksText = checkNodes.map((node) => {

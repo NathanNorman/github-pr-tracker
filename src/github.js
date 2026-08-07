@@ -227,11 +227,20 @@ function parsePullListDetail(row) {
     review = "approved";
   }
 
-  const checkText = [...row.querySelectorAll('[aria-label], img[alt], [class*="status"], [class*="color-fg-"]')]
+  const checkRoots = [...row.querySelectorAll(
+    '[aria-label*="check" i], img[alt*="check" i], [data-checks-state], .commit-build-statuses, [class*="status-check" i], [class*="check-status" i]'
+  )];
+  const checkNodes = [...new Set(checkRoots.flatMap((node) => [
+    node,
+    ...node.querySelectorAll('[aria-label], img[alt], [data-checks-state], [class]')
+  ]))];
+  const checkText = checkNodes
     .map((node) => [
       node.getAttribute("aria-label"),
       node.getAttribute("alt"),
-      node.getAttribute("class")
+      node.getAttribute("data-checks-state"),
+      node.getAttribute("class"),
+      node.textContent
     ].filter(Boolean).join(" "))
     .join(" ");
   const totals = checkText.match(/(\d+)\s*\/\s*(\d+)\s*checks? OK/i);

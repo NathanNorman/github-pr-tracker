@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.5.0
+// @version      1.5.1
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.5.0
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.5.1
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -21,7 +21,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 2;
+  var DETAIL_PARSER_VERSION = 3;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -234,7 +234,7 @@
     }
     const checkNodes = [
       ...doc.querySelectorAll(
-        '.commit-build-statuses summary, [data-deferred-details-content-url*="/status-details"], [data-mergeability-message], [aria-label*="checks" i], [data-checks-state]'
+        '.commit-build-statuses summary, [data-deferred-details-content-url*="/status-details"], [aria-label*="checks" i], [data-checks-state]'
       )
     ];
     const checksText = checkNodes.map((node) => {
@@ -1024,10 +1024,19 @@
     } else if (/\bapproved\b/i.test(rowText)) {
       review = "approved";
     }
-    const checkText = [...row.querySelectorAll('[aria-label], img[alt], [class*="status"], [class*="color-fg-"]')].map((node) => [
+    const checkRoots = [...row.querySelectorAll(
+      '[aria-label*="check" i], img[alt*="check" i], [data-checks-state], .commit-build-statuses, [class*="status-check" i], [class*="check-status" i]'
+    )];
+    const checkNodes = [...new Set(checkRoots.flatMap((node) => [
+      node,
+      ...node.querySelectorAll("[aria-label], img[alt], [data-checks-state], [class]")
+    ]))];
+    const checkText = checkNodes.map((node) => [
       node.getAttribute("aria-label"),
       node.getAttribute("alt"),
-      node.getAttribute("class")
+      node.getAttribute("data-checks-state"),
+      node.getAttribute("class"),
+      node.textContent
     ].filter(Boolean).join(" ")).join(" ");
     const totals = checkText.match(/(\d+)\s*\/\s*(\d+)\s*checks? OK/i);
     let checks = "unknown";

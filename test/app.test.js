@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createTrackerApp } from "../src/app.js";
+import { DETAIL_PARSER_VERSION } from "../src/constants.js";
 import { makeDom, parseHtml } from "./helpers.js";
 
 function makeStorage(seed) {
@@ -232,13 +233,19 @@ test("refresh preserves concurrent personal edits made during fetch", async () =
   assert.equal(storage.getEnvelope().records["acme/api#1"].notes, "keep me");
 });
 
-test("detail refresh merges deferred fields and preserves list draft flag", async () => {
+test("detail refresh invalidates older parser results, merges deferred fields, and preserves the list draft flag", async () => {
   const dom = makeDom();
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {},
     openListCache: { updatedAt: 1, items: [] },
-    detailCache: {}
+    detailCache: {
+      "acme/api#1": {
+        updatedAt: Date.now(),
+        parserVersion: DETAIL_PARSER_VERSION - 1,
+        detail: { review: "required", checks: "failing", merge: "blocked", draft: true }
+      }
+    }
   });
   const app = buildApp({
     dom,
@@ -270,7 +277,7 @@ test("detail refresh merges deferred fields and preserves list draft flag", asyn
   assert.equal(summary.checks, "passing");
   assert.equal(summary.merge, "blocked");
   assert.equal(summary.draft, true);
-  assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, 2);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, DETAIL_PARSER_VERSION);
 });
 
 test("default sort is updated desc then repository asc with invalid timestamps last", async () => {

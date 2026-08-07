@@ -44,6 +44,29 @@ test("parsePullListDocument reads Toast Enterprise review and check signals", ()
   );
 });
 
+test("parsePullListDocument isolates checks from generic review and merge icons", () => {
+  const doc = parseHtml(`
+    <div class="Box-row">
+      <a href="/acme/api/pull/14">Mixed native states</a>
+      <span class="color-fg-danger">Code owner review required</span>
+      <svg class="color-fg-danger" aria-label="Merging is blocked"></svg>
+      <svg class="color-fg-success" aria-label="7 / 7 checks OK"></svg>
+    </div>
+    <div class="Box-row">
+      <a href="/acme/web/pull/15">No check status</a>
+      <svg class="color-fg-danger octicon-x" aria-label="Merging is blocked"></svg>
+    </div>
+  `);
+  const result = parsePullListDocument(doc);
+  assert.deepEqual(
+    result.items.map(({ key, review, checks }) => ({ key, review, checks })),
+    [
+      { key: "acme/api#14", review: "required", checks: "passing" },
+      { key: "acme/web#15", review: "unknown", checks: "unknown" }
+    ]
+  );
+});
+
 test("parsePullListDocument does not infer draft state from the PR title", () => {
   const doc = parseHtml(`
     <div data-issue-and-pr-hovercards-enabled="true">
@@ -92,6 +115,16 @@ test("detail parser falls back to semantic DOM states", async () => {
     review: "required",
     checks: "passing",
     merge: "clean",
+    draft: undefined
+  });
+});
+
+test("detail parser isolates checks from blocked review and merge states", async () => {
+  const detail = parsePrDetailDocument(parseHtml(await fixture("detail-mixed-states.html")));
+  assert.deepEqual(detail, {
+    review: "required",
+    checks: "passing",
+    merge: "blocked",
     draft: undefined
   });
 });

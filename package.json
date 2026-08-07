@@ -1,6 +1,6 @@
 {
   "name": "github-pr-tracker",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "type": "module",
   "description": "Tampermonkey personal pull request tracker for GitHub.",
   "license": "MIT",
