@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.3.0
+// @version      1.3.1
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
