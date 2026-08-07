@@ -1,17 +1,18 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.3
+// @version      1.7.4
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.3
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.4
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
+// @grant        GM_info
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -21,7 +22,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 8;
+  var DETAIL_PARSER_VERSION = 9;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -2466,6 +2467,15 @@ select {
     const root = doc.createElement("div");
     root.className = "tracker-root";
     shadow.replaceChildren(style, root);
+    const containEditorKeyboardEvent = (event) => {
+      const origin = event.composedPath?.()[0] || event.target;
+      if (origin instanceof HTMLElement && (origin.matches("input, textarea, select") || origin.closest("[contenteditable='true']"))) {
+        event.stopPropagation();
+      }
+    };
+    shadow.addEventListener("keydown", containEditorKeyboardEvent);
+    shadow.addEventListener("keypress", containEditorKeyboardEvent);
+    shadow.addEventListener("keyup", containEditorKeyboardEvent);
     const pageHeader = doc.createElement("header");
     pageHeader.className = "page-header";
     const heading = doc.createElement("div");
@@ -2478,7 +2488,7 @@ select {
     subtitleText.textContent = "A private workspace for pull requests you opened";
     const privacy = doc.createElement("span");
     privacy.className = "privacy-note";
-    privacy.textContent = "Stored in this browser";
+    privacy.textContent = container.dataset.trackerVersion && container.dataset.trackerVersion !== "unknown" ? `Stored in this browser \xB7 v${container.dataset.trackerVersion}` : "Stored in this browser";
     pageSubtitle.append(subtitleText, privacy);
     heading.append(pageTitle, pageSubtitle);
     const search = doc.createElement("input");
@@ -2781,6 +2791,10 @@ select {
           const row = doc.createElement("div");
           row.className = "pr-row";
           row.dataset.prKey = summary.key;
+          row.dataset.checksState = summary.checks || "unknown";
+          if (summary.headSha) {
+            row.dataset.headSha = summary.headSha;
+          }
           const rowButton = doc.createElement("button");
           rowButton.type = "button";
           rowButton.className = "pr-row-select";
@@ -3578,7 +3592,7 @@ select {
   }
 
   // src/app.js
-  function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }) {
+  function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, version = "unknown" }) {
     const state = {
       login,
       allSummaries: [],
@@ -3661,6 +3675,7 @@ select {
       if (!host) {
         host = doc.createElement("section");
         host.id = "tm-pr-tracker-root";
+        host.dataset.trackerVersion = version;
         ui = createUi(host, createHandlers());
       }
       main.append(host);
@@ -3832,14 +3847,19 @@ select {
       const hasCurrentHead = Boolean(summary.headSha);
       if (hasCurrentHead) {
         detail = { ...detail, checks: "unknown" };
-        const currentIconUrl = findDeferredStatusEndpoint(prDocument, summary.url, summary.headSha);
-        const currentHeadUrls = [...new Set([currentIconUrl, summary.checksUrl].filter(Boolean))];
-        for (const deferredUrl of currentHeadUrls) {
-          const deferredDetail = await fetchDeferredDetail(deferredUrl, { preferHtml: true });
-          if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
-            detail = mergeDeferredChecks(detail, deferredDetail);
-            verifiedHeadAwareChecks = true;
-            break;
+        if (summary.checks === "passing") {
+          detail = mergeDeferredChecks(detail, { checks: "passing" });
+          verifiedHeadAwareChecks = true;
+        } else {
+          const currentIconUrl = findDeferredStatusEndpoint(prDocument, summary.url, summary.headSha);
+          const currentHeadUrls = [...new Set([currentIconUrl, summary.checksUrl].filter(Boolean))];
+          for (const deferredUrl of currentHeadUrls) {
+            const deferredDetail = await fetchDeferredDetail(deferredUrl, { preferHtml: true });
+            if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+              detail = mergeDeferredChecks(detail, deferredDetail);
+              verifiedHeadAwareChecks = true;
+              break;
+            }
           }
         }
       } else if (detail.review === "unknown" || detail.checks === "unknown" || detail.merge === "unknown") {
@@ -4334,7 +4354,8 @@ GitHub's default commit title will be kept and the commit message body will be e
       fetchImpl: window.fetch.bind(window),
       parser: createDocumentParser(),
       storage: createStorage(getGmApi(), login),
-      login
+      login,
+      version: globalThis.GM_info?.script?.version || "unknown"
     });
     await app.init();
     const rerun = () => {

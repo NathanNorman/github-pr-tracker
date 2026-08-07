@@ -55,6 +55,24 @@ export function createUi(container, handlers) {
   root.className = "tracker-root";
   shadow.replaceChildren(style, root);
 
+  // Events leaving a shadow root are retargeted to the host element. GitHub's
+  // global keyboard shortcuts can therefore mistake typing in our editors for
+  // typing on the page and move focus to its search box. Keep editable-control
+  // keyboard events inside the tracker while preserving normal behavior in the
+  // focused control itself.
+  const containEditorKeyboardEvent = (event) => {
+    const origin = event.composedPath?.()[0] || event.target;
+    if (
+      origin instanceof HTMLElement &&
+      (origin.matches("input, textarea, select") || origin.closest("[contenteditable='true']"))
+    ) {
+      event.stopPropagation();
+    }
+  };
+  shadow.addEventListener("keydown", containEditorKeyboardEvent);
+  shadow.addEventListener("keypress", containEditorKeyboardEvent);
+  shadow.addEventListener("keyup", containEditorKeyboardEvent);
+
   const pageHeader = doc.createElement("header");
   pageHeader.className = "page-header";
   const heading = doc.createElement("div");
@@ -67,7 +85,9 @@ export function createUi(container, handlers) {
   subtitleText.textContent = "A private workspace for pull requests you opened";
   const privacy = doc.createElement("span");
   privacy.className = "privacy-note";
-  privacy.textContent = "Stored in this browser";
+  privacy.textContent = container.dataset.trackerVersion && container.dataset.trackerVersion !== "unknown"
+    ? `Stored in this browser · v${container.dataset.trackerVersion}`
+    : "Stored in this browser";
   pageSubtitle.append(subtitleText, privacy);
   heading.append(pageTitle, pageSubtitle);
 
@@ -403,6 +423,10 @@ export function createUi(container, handlers) {
       const row = doc.createElement("div");
       row.className = "pr-row";
       row.dataset.prKey = summary.key;
+      row.dataset.checksState = summary.checks || "unknown";
+      if (summary.headSha) {
+        row.dataset.headSha = summary.headSha;
+      }
 
       const rowButton = doc.createElement("button");
       rowButton.type = "button";

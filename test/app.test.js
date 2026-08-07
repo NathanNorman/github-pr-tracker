@@ -166,6 +166,62 @@ test("search and notes keep focus and value across updates", async () => {
   }
 });
 
+test("drawer editors contain keyboard events so GitHub search cannot steal focus", async () => {
+  const dom = makeDom();
+  const nativeSearch = dom.window.document.createElement("input");
+  nativeSearch.type = "search";
+  nativeSearch.setAttribute("aria-label", "GitHub search");
+  dom.window.document.body.prepend(nativeSearch);
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([{ href: "/acme/api/pull/1", title: "Fix CI", draft: false }])
+          : "<html><body></body></html>"
+    })
+  });
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+
+  let escapedKeydowns = 0;
+  dom.window.document.addEventListener("keydown", (event) => {
+    escapedKeydowns += 1;
+    if (!(event.target instanceof dom.window.HTMLInputElement) && !(event.target instanceof dom.window.HTMLTextAreaElement)) {
+      nativeSearch.focus();
+    }
+  });
+
+  for (const editor of [
+    shadow.querySelector('[aria-label="Private label name"]'),
+    shadow.querySelector('textarea[data-focus-id="notes"]')
+  ]) {
+    editor.focus();
+    editor.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+      bubbles: true,
+      composed: true,
+      key: "a"
+    }));
+    assert.equal(shadow.activeElement, editor);
+    assert.equal(dom.window.document.activeElement, dom.window.document.querySelector("#tm-pr-tracker-root"));
+  }
+  assert.equal(escapedKeydowns, 0);
+});
+
 test("drawer note and private-label drafts keep the same focused field across storage rerenders", async () => {
   const dom = makeDom();
   const storage = makeStorage({
@@ -657,7 +713,7 @@ test("detail refresh invalidates older parser results, merges deferred fields, a
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, DETAIL_PARSER_VERSION);
 });
 
-test("detail refresh lets current-head status-details override a stale known failure in the main PR page", async () => {
+test("detail refresh keeps a green authored-list current-head status authoritative over stale main-page failures", async () => {
   const sha = "1234567890abcdef1234567890abcdef12345678";
   const dom = makeDom();
   const storage = makeStorage({
@@ -666,11 +722,13 @@ test("detail refresh lets current-head status-details override a stale known fai
     openListCache: { updatedAt: 1, items: [] },
     detailCache: {}
   });
+  const requested = [];
   const app = buildApp({
     dom,
     storage,
     fetchImpl: async (url) => {
       const value = String(url);
+      requested.push(value);
       if (value.includes("/pulls")) {
         return {
           ok: true,
@@ -680,7 +738,7 @@ test("detail refresh lets current-head status-details override a stale known fai
             draft: false
           }]).replace(
             "</div>",
-            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
+            `<details class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"><summary class="color-fg-success"><svg aria-label="7 / 7 checks OK" class="octicon octicon-check"></svg></summary></details></div>`
           )
         };
       }
@@ -696,17 +754,6 @@ test("detail refresh lets current-head status-details override a stale known fai
             </body></html>`
         };
       }
-      if (value.includes(`/commit/${sha}/status-details`)) {
-        return {
-          ok: true,
-          text: async () => `
-            <div class="branch-action-item branch-action-item-simple">
-              <h3 class="status-heading">All checks have passed</h3>
-              <span class="status-meta">7 successful checks</span>
-            </div>`,
-          headers: { get: () => "text/html" }
-        };
-      }
       if (value.endsWith("/pull/1/files")) {
         return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
       }
@@ -716,6 +763,7 @@ test("detail refresh lets current-head status-details override a stale known fai
 
   await app.init();
   assert.equal(app.getState().allSummaries[0].checks, "passing");
+  assert.equal(requested.some((url) => url.includes(`/commit/${sha}/status-details`)), false);
   const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
   assert.match(shadow.textContent, /Checks passing/);
 });
@@ -742,7 +790,7 @@ test("detail refresh prefers the exact current-head icon over stale main and his
           ok: true,
           text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]).replace(
             "</div>",
-            `<details class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"><summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary></details></div>`
+            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
           )
         };
       }
@@ -780,6 +828,7 @@ test("detail refresh prefers the exact current-head icon over stale main and his
   await app.init();
   assert.equal(app.getState().allSummaries[0].checks, "passing");
   assert.equal(requested.some((url) => url.includes(`oid=${oldSha}`)), false);
+  assert.equal(requested.some((url) => url.includes(`/partials/commit_status_icon?oid=${sha}`)), true);
   assert.equal(requested.some((url) => url.includes(`/commit/${sha}/status-details`)), false);
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].headSha, sha);
 });
@@ -848,7 +897,7 @@ test("detail cache preserves fetch timestamp on cache hits and misses old cache 
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].updatedAt, firstCacheEntry.updatedAt);
 });
 
-test("current-head status failures fall back to the current green list row without caching and retry", async () => {
+test("unknown authored current-head status retries exact head checks on 503 without poisoning cache", async () => {
   const sha = "1234567890abcdef1234567890abcdef12345678";
   const dom = makeDom();
   const storage = makeStorage({
@@ -868,7 +917,7 @@ test("current-head status failures fall back to the current green list row witho
           ok: true,
           text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]).replace(
             "</div>",
-            `<details class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"><summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary></details></div>`
+            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
           )
         };
       }
@@ -877,6 +926,7 @@ test("current-head status failures fall back to the current green list row witho
           ok: true,
           text: async () => `
             <html><body>
+              <div data-url="/acme/api/pull/1/partials/commit_status_icon?oid=${sha}"></div>
               <div class="mergeability-details">
                 <div class="branch-action-item"><h3 class="status-heading">Some checks failed</h3></div>
                 <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
@@ -884,7 +934,7 @@ test("current-head status failures fall back to the current green list row witho
             </body></html>`
         };
       }
-      if (value.includes(`/commit/${sha}/status-details`)) {
+      if (value.includes(`/partials/commit_status_icon?oid=${sha}`)) {
         checksFetches += 1;
         return { ok: false, status: 503, headers: { get: () => "text/html" } };
       }
@@ -897,12 +947,12 @@ test("current-head status failures fall back to the current green list row witho
 
   await app.init();
   assert.equal(checksFetches, 1);
-  assert.equal(app.getState().allSummaries[0].checks, "passing");
+  assert.equal(app.getState().allSummaries[0].checks, "unknown");
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
 
   await app.refresh(false);
   assert.equal(checksFetches, 2);
-  assert.equal(app.getState().allSummaries[0].checks, "passing");
+  assert.equal(app.getState().allSummaries[0].checks, "unknown");
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
 });
 

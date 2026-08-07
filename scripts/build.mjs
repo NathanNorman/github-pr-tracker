@@ -22,6 +22,7 @@ const metadata = `// ==UserScript==
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
+// @grant        GM_info
 // @run-at       document-idle
 // ==/UserScript==
 `;

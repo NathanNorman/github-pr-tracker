@@ -26,6 +26,7 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
     detailCache: {}
   };
   window.console.error = (...args) => errors.push(args.map(String).join(" "));
+  window.GM_info = { script: { version: "1.7.4" } };
   window.GM_getValue = async () => structuredClone(envelope);
   window.GM_setValue = async () => {};
   window.GM_addValueChangeListener = () => 1;
@@ -43,19 +44,17 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
 
   const host = window.document.querySelector("#tm-pr-tracker-root");
   assert.ok(host, errors.join("\n"));
+  assert.equal(host.dataset.trackerVersion, "1.7.4");
   assert.ok(host.shadowRoot.querySelector(".sort-summary"), errors.join("\n"));
   assert.ok(host.shadowRoot.querySelector(".filter-summary"), errors.join("\n"));
   assert.equal(host.shadowRoot.querySelector(".pr-group-title")?.textContent, "toast-analytics");
   assert.deepEqual(errors, []);
 });
 
-test("built userscript renders AAP-490 passing from its exact current-head icon despite stale PR failure markup", async () => {
+test("built userscript keeps a green authored-list current head authoritative over stale PR failure markup", async () => {
   const source = await readFile(new URL("../dist/github-pr-tracker.user.js", import.meta.url), "utf8");
   const headSha = "c90c99a44c02d34e8717d83fa00dab560b218d6d";
-  const oldSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const prUrl = "https://github.toasttab.com/toasttab/toast-labor/pull/704";
-  const statusUrl = `https://github.toasttab.com/toasttab/toast-labor/commit/${headSha}/status-details?popover=true`;
-  const iconUrl = `${prUrl}/partials/commit_status_icon?oid=${headSha}`;
   const requests = [];
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><main><div>Native pulls</div></main></body></html>',
@@ -76,6 +75,7 @@ test("built userscript renders AAP-490 passing from its exact current-head icon 
   };
 
   window.console.error = (...args) => errors.push(args.map(String).join(" "));
+  window.GM_info = { script: { version: "1.7.4" } };
   window.GM_getValue = async () => structuredClone(envelope);
   window.GM_setValue = async (_key, value) => {
     envelope = structuredClone(value);
@@ -89,25 +89,24 @@ test("built userscript renders AAP-490 passing from its exact current-head icon 
       return response(`
         <div data-issue-and-pr-hovercards-enabled="true">
           <a data-hovercard-type="pull_request" href="/toasttab/toast-labor/pull/704">[AAP-490] Preserve restaurant currency in labor cost events</a>
-          <details class="commit-build-statuses" data-deferred-details-content-url="/toasttab/toast-labor/commit/${headSha}/status-details?popover=true">
+          <details
+            class="commit-build-statuses"
+            data-checks-state="passing"
+            data-head-sha="${headSha}"
+            data-deferred-details-content-url="/toasttab/toast-labor/commit/${headSha}/status-details?popover=true"
+          >
             <summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary>
           </details>
         </div>`);
     }
     if (url.href === prUrl) {
       return response(`
-        <div data-url="/toasttab/toast-labor/pull/704/partials/commit_status_icon?oid=${oldSha}"></div>
+        <div data-url="/toasttab/toast-labor/pull/704/partials/commit_status_icon?oid=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></div>
         <div data-url="/toasttab/toast-labor/pull/704/partials/commit_status_icon?oid=${headSha}"></div>
         <div class="mergeability-details">
           <div class="branch-action-item"><h3 class="status-heading">Some checks failed</h3></div>
           <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
         </div>`);
-    }
-    if (url.href === iconUrl) {
-      return response('<details class="commit-build-statuses"><summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary></details>');
-    }
-    if (url.href === statusUrl) {
-      return response("unavailable", false, 503);
     }
     if (url.href === `${prUrl}/files`) {
       return response('<div class="js-diff-progressive-container"></div>');
@@ -115,7 +114,7 @@ test("built userscript renders AAP-490 passing from its exact current-head icon 
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.7\.3$/m);
+  assert.match(source, /^\/\/ @version\s+1\.7\.4$/m);
   window.eval(source);
   await waitFor(
     () => envelope.detailCache["toasttab/toast-labor#704"]?.detail?.checks === "passing",
@@ -125,13 +124,21 @@ test("built userscript renders AAP-490 passing from its exact current-head icon 
   const badge = window.document
     .querySelector("#tm-pr-tracker-root")
     ?.shadowRoot?.querySelector('.pr-row[data-pr-key="toasttab/toast-labor#704"] [data-kind="checks"]');
+  const host = window.document.querySelector("#tm-pr-tracker-root");
+  const row = host?.shadowRoot?.querySelector('.pr-row[data-pr-key="toasttab/toast-labor#704"]');
+  const summary = envelope.openListCache.items.find(({ key }) => key === "toasttab/toast-labor#704");
   assert.equal(badge?.dataset.state, "passing");
   assert.equal(badge?.textContent, "Checks passing");
+  assert.equal(row?.dataset.checksState, "passing");
+  assert.equal(row?.dataset.headSha, headSha);
+  assert.equal(summary?.checks, "passing");
+  assert.equal(summary?.headSha, headSha);
   assert.equal(envelope.detailCache["toasttab/toast-labor#704"].headSha, headSha);
-  assert.equal(requests.filter(({ url }) => url.includes("/partials/commit_status_icon")).length, 1);
-  assert.equal(requests.some(({ url }) => url.includes(`oid=${oldSha}`)), false);
-  assert.equal(requests.some(({ url }) => url === statusUrl), false);
-  assert.equal(requests.find(({ url }) => url === iconUrl)?.accept, "text/html,application/xhtml+xml");
+  assert.equal(host?.dataset.trackerVersion, "1.7.4");
+  assert.deepEqual(
+    requests.filter(({ url }) => url.includes("/partials/commit_status_icon") || url.includes("/status-details")),
+    []
+  );
   assert.deepEqual(errors, []);
 });
 
@@ -139,7 +146,7 @@ test("built userscript keeps note and private-label editors mounted across remot
   const source = await readFile(new URL("../dist/github-pr-tracker.user.js", import.meta.url), "utf8");
   const prUrl = "https://github.toasttab.com/acme/api/pull/1";
   const dom = new JSDOM(
-    '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><main><div>Native pulls</div></main></body></html>',
+    '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><input id="github-search" type="search"><main><div>Native pulls</div></main></body></html>',
     {
       url: "https://github.toasttab.com/pulls#pr-tracker",
       pretendToBeVisual: true,
@@ -160,6 +167,7 @@ test("built userscript keeps note and private-label editors mounted across remot
   };
 
   window.console.error = (...args) => errors.push(args.map(String).join(" "));
+  window.GM_info = { script: { version: "1.7.4" } };
   window.GM_getValue = async () => structuredClone(envelope);
   window.GM_setValue = async (_key, value) => {
     envelope = structuredClone(value);
@@ -183,7 +191,7 @@ test("built userscript keeps note and private-label editors mounted across remot
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.7\.3$/m);
+  assert.match(source, /^\/\/ @version\s+1\.7\.4$/m);
   window.eval(source);
   await waitFor(
     () => window.document.querySelector("#tm-pr-tracker-root")?.shadowRoot?.querySelector(".pr-row-select"),
@@ -194,6 +202,12 @@ test("built userscript keeps note and private-label editors mounted across remot
   shadow.querySelector(".pr-row-select").click();
   const notes = shadow.querySelector('textarea[data-focus-id="notes"]');
   const tagInput = shadow.querySelector('[aria-label="Private label name"]');
+  const githubSearch = window.document.querySelector("#github-search");
+  let escapedKeydowns = 0;
+  window.document.addEventListener("keydown", () => {
+    escapedKeydowns += 1;
+    githubSearch.focus();
+  });
   const removedEditors = [];
   const observer = new window.MutationObserver((mutations) => {
     for (const mutation of mutations) {
@@ -207,6 +221,8 @@ test("built userscript keeps note and private-label editors mounted across remot
   observer.observe(shadow.querySelector(".drawer"), { childList: true, subtree: true });
 
   notes.focus();
+  notes.dispatchEvent(new window.KeyboardEvent("keydown", { bubbles: true, composed: true, key: "a" }));
+  assert.equal(shadow.activeElement, notes);
   notes.value = "ab";
   notes.setSelectionRange(2, 2);
   notes.dispatchEvent(new window.Event("input", { bubbles: true }));
@@ -219,12 +235,15 @@ test("built userscript keeps note and private-label editors mounted across remot
   assert.equal(notes.selectionStart, 2);
 
   tagInput.focus();
+  tagInput.dispatchEvent(new window.KeyboardEvent("keydown", { bubbles: true, composed: true, key: "u" }));
+  assert.equal(shadow.activeElement, tagInput);
   tagInput.value = "urgent";
   tagInput.dispatchEvent(new window.Event("input", { bubbles: true }));
   remoteStorageListener("tracker", envelope, remoteEnvelope, true);
   assert.equal(shadow.querySelector('[aria-label="Private label name"]'), tagInput);
   assert.equal(shadow.activeElement, tagInput);
   assert.equal(tagInput.value, "urgent");
+  assert.equal(escapedKeydowns, 0);
   assert.deepEqual(removedEditors, []);
   assert.deepEqual(errors, []);
   observer.disconnect();

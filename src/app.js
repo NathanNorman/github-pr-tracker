@@ -23,7 +23,7 @@ import { styles } from "./styles.js";
 import { createUi } from "./ui.js";
 import { mapLimit, now } from "./utils.js";
 
-export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }) {
+export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, version = "unknown" }) {
   const state = {
     login,
     allSummaries: [],
@@ -112,6 +112,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     if (!host) {
       host = doc.createElement("section");
       host.id = "tm-pr-tracker-root";
+      host.dataset.trackerVersion = version;
       ui = createUi(host, createHandlers());
     }
     main.append(host);
@@ -318,14 +319,22 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       // checks. If they are unavailable, fall back to the current list row or
       // unknown instead of rendering a stale failure.
       detail = { ...detail, checks: "unknown" };
-      const currentIconUrl = findDeferredStatusEndpoint(prDocument, summary.url, summary.headSha);
-      const currentHeadUrls = [...new Set([currentIconUrl, summary.checksUrl].filter(Boolean))];
-      for (const deferredUrl of currentHeadUrls) {
-        const deferredDetail = await fetchDeferredDetail(deferredUrl, { preferHtml: true });
-        if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
-          detail = mergeDeferredChecks(detail, deferredDetail);
-          verifiedHeadAwareChecks = true;
-          break;
+      if (summary.checks === "passing") {
+        // The authored list rollup is already scoped to summary.headSha. A
+        // green current-head signal must not be downgraded by contradictory
+        // detail fragments or error placeholders from another page surface.
+        detail = mergeDeferredChecks(detail, { checks: "passing" });
+        verifiedHeadAwareChecks = true;
+      } else {
+        const currentIconUrl = findDeferredStatusEndpoint(prDocument, summary.url, summary.headSha);
+        const currentHeadUrls = [...new Set([currentIconUrl, summary.checksUrl].filter(Boolean))];
+        for (const deferredUrl of currentHeadUrls) {
+          const deferredDetail = await fetchDeferredDetail(deferredUrl, { preferHtml: true });
+          if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+            detail = mergeDeferredChecks(detail, deferredDetail);
+            verifiedHeadAwareChecks = true;
+            break;
+          }
         }
       }
     } else if (

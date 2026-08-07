@@ -27,7 +27,8 @@ async function bootstrap() {
     fetchImpl: window.fetch.bind(window),
     parser: createDocumentParser(),
     storage: createStorage(getGmApi(), login),
-    login
+    login,
+    version: globalThis.GM_info?.script?.version || "unknown"
   });
 
   await app.init();
