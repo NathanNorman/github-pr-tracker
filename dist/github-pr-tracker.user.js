@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.6.1
+// @version      1.6.2
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.6.1
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.6.2
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -21,7 +21,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 5;
+  var DETAIL_PARSER_VERSION = 6;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -194,7 +194,8 @@
       draft: typeof draft === "boolean" ? draft : void 0
     };
   }
-  function findEmbeddedPayload(doc) {
+  function findEmbeddedPayload(doc, baseUrl) {
+    const expectedNumber = pullRequestNumber(baseUrl);
     for (const script of doc.querySelectorAll("script")) {
       const text = script.textContent || "";
       const isCurrentEmbeddedData = script.matches('script[type="application/json"][data-target*="embeddedData"]');
@@ -204,7 +205,7 @@
       const matches = text.match(/\{[\s\S]*\}/g) || [];
       for (const candidate of matches) {
         const parsed = safeJsonParse(candidate);
-        const detail = extractNestedPayloadDetail(parsed);
+        const detail = extractNestedPayloadDetail(parsed, expectedNumber);
         if (detail) {
           return detail;
         }
@@ -318,10 +319,10 @@
     const draft = /draft/i.test(doc.querySelector('[aria-label="Pull request state"]')?.textContent || "") ? true : void 0;
     return { review, checks, merge, draft };
   }
-  function parsePrDetailDocument(doc) {
-    const embedded = findEmbeddedPayload(doc);
+  function parsePrDetailDocument(doc, baseUrl = doc?.URL) {
+    const embedded = findEmbeddedPayload(doc, baseUrl);
     const dom = detailFromDom(doc);
-    return mergeNativeDetails(embedded, dom);
+    return mergeNativeDetails(dom, embedded);
   }
   function parseUnresolvedThreadCountDocument(doc) {
     const candidates = [
@@ -403,30 +404,48 @@
     const controlsText = [...thread.querySelectorAll("button, input[type='submit']")].map((node) => node.textContent || node.getAttribute("value") || "").join(" ");
     return /unresolve (?:conversation|thread)/i.test(controlsText);
   }
-  function extractNestedPayloadDetail(root) {
-    const stack = [root];
-    const seen = /* @__PURE__ */ new Set();
-    let merged = null;
-    while (stack.length) {
-      const value = stack.pop();
-      if (!value || typeof value !== "object" || seen.has(value)) {
+  function extractNestedPayloadDetail(root, expectedNumber) {
+    if (!root || typeof root !== "object") {
+      return null;
+    }
+    const candidates = [
+      root.payload?.pullRequestsLayoutRoute?.pullRequest,
+      root.pullRequestsLayoutRoute?.pullRequest,
+      root.props?.pullRequest,
+      root.data?.repository?.pullRequest,
+      root.pullRequest
+    ];
+    for (const candidate of candidates) {
+      if (!matchesPullRequestNumber(candidate, expectedNumber)) {
         continue;
       }
-      seen.add(value);
-      const detail = parsePrDetailPayload(value);
+      const detail = parsePrDetailPayload(candidate);
       if (detail) {
-        merged = mergeNativeDetails(merged, detail);
-        if (merged.review !== "unknown" && merged.checks !== "unknown" && merged.merge !== "unknown" && typeof merged.draft === "boolean") {
-          return merged;
-        }
-      }
-      for (const child of Object.values(value)) {
-        if (child && typeof child === "object") {
-          stack.push(child);
-        }
+        return detail;
       }
     }
-    return merged;
+    if (expectedNumber && !matchesPullRequestNumber(root, expectedNumber, true)) {
+      return null;
+    }
+    return parsePrDetailPayload(root);
+  }
+  function matchesPullRequestNumber(candidate, expectedNumber, requireIdentity = false) {
+    if (!candidate || typeof candidate !== "object" || !expectedNumber) {
+      return !requireIdentity;
+    }
+    const candidateNumber = Number(candidate.number);
+    if (Number.isInteger(candidateNumber)) {
+      return candidateNumber === expectedNumber;
+    }
+    const identity = String(candidate.url || candidate.permalink || candidate.resourcePath || "");
+    if (identity) {
+      return new RegExp(`/pull/${expectedNumber}(?:/|$)`).test(identity);
+    }
+    return !requireIdentity;
+  }
+  function pullRequestNumber(baseUrl) {
+    const match = String(baseUrl || "").match(/\/pull\/(\d+)(?:\/|$)/);
+    return match ? Number(match[1]) : null;
   }
 
   // src/models.js
@@ -3518,8 +3537,8 @@ select {
     }
     async function fetchDetail(summary) {
       const html = await fetchHtml(fetchImpl, summary.url);
-      const prDocument = parser(html);
-      let detail = parsePrDetailDocument(prDocument);
+      const prDocument = parser(html, summary.url);
+      let detail = parsePrDetailDocument(prDocument, summary.url);
       const needsDeferred = detail.review === "unknown" || detail.checks === "unknown" || detail.merge === "unknown";
       if (needsDeferred) {
         const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
@@ -3538,7 +3557,7 @@ select {
                 deferredDetail = parsePrDetailPayload(await response.json());
               } else {
                 const body = await response.text();
-                deferredDetail = parsePrDetailDocument(parser(body, deferredUrl));
+                deferredDetail = parsePrDetailDocument(parser(body, deferredUrl), deferredUrl);
                 if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
                   deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
                 }

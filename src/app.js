@@ -300,8 +300,8 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
 
   async function fetchDetail(summary) {
     const html = await fetchHtml(fetchImpl, summary.url);
-    const prDocument = parser(html);
-    let detail = parsePrDetailDocument(prDocument);
+    const prDocument = parser(html, summary.url);
+    let detail = parsePrDetailDocument(prDocument, summary.url);
     const needsDeferred =
       detail.review === "unknown" ||
       detail.checks === "unknown" ||
@@ -323,7 +323,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
               deferredDetail = parsePrDetailPayload(await response.json());
             } else {
               const body = await response.text();
-              deferredDetail = parsePrDetailDocument(parser(body, deferredUrl));
+              deferredDetail = parsePrDetailDocument(parser(body, deferredUrl), deferredUrl);
               if (/\/partials\/commit_status_icon(?:\?|$)/.test(deferredUrl) && !body.trim()) {
                 deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
               }

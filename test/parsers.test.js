@@ -149,6 +149,41 @@ test("detail parser uses the current merge-box rollup instead of an older failed
   });
 });
 
+test("detail parser lets the current merge box override a stale embedded failure", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <script type="application/json" data-target="react-app.embeddedData">
+      {"payload":{"pullRequestsLayoutRoute":{"pullRequest":{"number":30,"reviewDecision":"APPROVED","statusCheckRollup":{"state":"FAILURE"},"mergeStateStatus":"BLOCKED"}}}}
+    </script>
+    <div class="mergeability-details">
+      <div class="branch-action-item"><h3 class="status-heading">Code owner review required</h3></div>
+      <div class="branch-action-item"><h3 class="status-heading">All checks have passed</h3><span class="status-meta">7 successful checks</span></div>
+      <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
+    </div>
+  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"));
+
+  assert.deepEqual(detail, {
+    review: "required",
+    checks: "passing",
+    merge: "blocked",
+    draft: undefined
+  });
+});
+
+test("detail parser ignores unrelated embedded check rollups for the current PR", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <script type="application/json" data-target="react-app.embeddedData">
+      {
+        "timeline":{"commit":{"number":29,"statusCheckRollup":{"state":"FAILURE"}}},
+        "payload":{"pullRequestsLayoutRoute":{"pullRequest":{"number":30,"reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":{"state":"SUCCESS"},"mergeStateStatus":"BLOCKED"}}}
+      }
+    </script>
+  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"));
+
+  assert.equal(detail.review, "required");
+  assert.equal(detail.checks, "passing");
+  assert.equal(detail.merge, "blocked");
+});
+
 test("detail parser keeps reviews and checks independent in alternate merge-box markup", () => {
   const cases = [
     {

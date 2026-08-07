@@ -81,7 +81,8 @@ export function parsePrDetailPayload(payload) {
   };
 }
 
-function findEmbeddedPayload(doc) {
+function findEmbeddedPayload(doc, baseUrl) {
+  const expectedNumber = pullRequestNumber(baseUrl);
   for (const script of doc.querySelectorAll("script")) {
     const text = script.textContent || "";
     const isCurrentEmbeddedData = script.matches('script[type="application/json"][data-target*="embeddedData"]');
@@ -96,7 +97,7 @@ function findEmbeddedPayload(doc) {
     const matches = text.match(/\{[\s\S]*\}/g) || [];
     for (const candidate of matches) {
       const parsed = safeJsonParse(candidate);
-      const detail = extractNestedPayloadDetail(parsed);
+      const detail = extractNestedPayloadDetail(parsed, expectedNumber);
       if (detail) {
         return detail;
       }
@@ -231,10 +232,10 @@ function detailFromDom(doc) {
   return { review, checks, merge, draft };
 }
 
-export function parsePrDetailDocument(doc) {
-  const embedded = findEmbeddedPayload(doc);
+export function parsePrDetailDocument(doc, baseUrl = doc?.URL) {
+  const embedded = findEmbeddedPayload(doc, baseUrl);
   const dom = detailFromDom(doc);
-  return mergeNativeDetails(embedded, dom);
+  return mergeNativeDetails(dom, embedded);
 }
 
 export function parseUnresolvedThreadCountDocument(doc) {
@@ -344,30 +345,51 @@ function isResolvedThread(thread) {
   return /unresolve (?:conversation|thread)/i.test(controlsText);
 }
 
-function extractNestedPayloadDetail(root) {
-  const stack = [root];
-  const seen = new Set();
-  let merged = null;
+function extractNestedPayloadDetail(root, expectedNumber) {
+  if (!root || typeof root !== "object") {
+    return null;
+  }
 
-  while (stack.length) {
-    const value = stack.pop();
-    if (!value || typeof value !== "object" || seen.has(value)) {
+  const candidates = [
+    root.payload?.pullRequestsLayoutRoute?.pullRequest,
+    root.pullRequestsLayoutRoute?.pullRequest,
+    root.props?.pullRequest,
+    root.data?.repository?.pullRequest,
+    root.pullRequest
+  ];
+
+  for (const candidate of candidates) {
+    if (!matchesPullRequestNumber(candidate, expectedNumber)) {
       continue;
     }
-    seen.add(value);
-    const detail = parsePrDetailPayload(value);
+    const detail = parsePrDetailPayload(candidate);
     if (detail) {
-      merged = mergeNativeDetails(merged, detail);
-      if (merged.review !== "unknown" && merged.checks !== "unknown" && merged.merge !== "unknown" && typeof merged.draft === "boolean") {
-        return merged;
-      }
-    }
-    for (const child of Object.values(value)) {
-      if (child && typeof child === "object") {
-        stack.push(child);
-      }
+      return detail;
     }
   }
 
-  return merged;
+  if (expectedNumber && !matchesPullRequestNumber(root, expectedNumber, true)) {
+    return null;
+  }
+  return parsePrDetailPayload(root);
+}
+
+function matchesPullRequestNumber(candidate, expectedNumber, requireIdentity = false) {
+  if (!candidate || typeof candidate !== "object" || !expectedNumber) {
+    return !requireIdentity;
+  }
+  const candidateNumber = Number(candidate.number);
+  if (Number.isInteger(candidateNumber)) {
+    return candidateNumber === expectedNumber;
+  }
+  const identity = String(candidate.url || candidate.permalink || candidate.resourcePath || "");
+  if (identity) {
+    return new RegExp(`/pull/${expectedNumber}(?:/|$)`).test(identity);
+  }
+  return !requireIdentity;
+}
+
+function pullRequestNumber(baseUrl) {
+  const match = String(baseUrl || "").match(/\/pull\/(\d+)(?:\/|$)/);
+  return match ? Number(match[1]) : null;
 }
