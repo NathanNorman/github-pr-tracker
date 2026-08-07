@@ -1,20 +1,22 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import esbuild from "esbuild";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const distDir = path.join(root, "dist");
 const outputFile = path.join(distDir, "github-pr-tracker.user.js");
+const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+const userscriptVersion = packageJson.version;
 
 const metadata = `// ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.3.1
+// @version      ${userscriptVersion}
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js
-// @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=${userscriptVersion}
+// @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
 // @grant        GM_setValue
