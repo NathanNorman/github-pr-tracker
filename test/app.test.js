@@ -302,6 +302,282 @@ test("detail refresh invalidates older parser results, merges deferred fields, a
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, DETAIL_PARSER_VERSION);
 });
 
+test("detail refresh lets current-head status-details override a stale known failure in the main PR page", async () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: { updatedAt: 1, items: [] },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => {
+      const value = String(url);
+      if (value.includes("/pulls")) {
+        return {
+          ok: true,
+          text: async () => pullsHtml([{
+            href: "/acme/api/pull/1",
+            title: "One",
+            draft: false
+          }]).replace(
+            "</div>",
+            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
+          )
+        };
+      }
+      if (value.endsWith("/pull/1")) {
+        return {
+          ok: true,
+          text: async () => `
+            <html><body>
+              <div class="mergeability-details">
+                <div class="branch-action-item"><h3 class="status-heading">Some checks failed</h3></div>
+                <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
+              </div>
+            </body></html>`
+        };
+      }
+      if (value.includes(`/commit/${sha}/status-details`)) {
+        return {
+          ok: true,
+          text: async () => `
+            <div class="branch-action-item branch-action-item-simple">
+              <h3 class="status-heading">All checks have passed</h3>
+              <span class="status-meta">7 successful checks</span>
+            </div>`,
+          headers: { get: () => "text/html" }
+        };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      throw new Error(`Unexpected url ${value}`);
+    }
+  });
+
+  await app.init();
+  assert.equal(app.getState().allSummaries[0].checks, "passing");
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  assert.match(shadow.textContent, /Checks passing/);
+});
+
+test("detail cache preserves fetch timestamp on cache hits and misses old cache entries without a matching head sha", async () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: { updatedAt: 1, items: [] },
+    detailCache: {
+      "acme/api#1": {
+        updatedAt: 1234,
+        parserVersion: DETAIL_PARSER_VERSION,
+        detail: { checks: "passing" }
+      }
+    }
+  });
+  let pullDetailFetches = 0;
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => {
+      const value = String(url);
+      if (value.includes("/pulls")) {
+        return {
+          ok: true,
+          text: async () => pullsHtml([{
+            href: "/acme/api/pull/1",
+            title: "One",
+            draft: false
+          }]).replace(
+            "</div>",
+            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
+          )
+        };
+      }
+      if (value.endsWith("/pull/1")) {
+        pullDetailFetches += 1;
+        return { ok: true, text: async () => "<html><body></body></html>" };
+      }
+      if (value.includes(`/commit/${sha}/status-details`)) {
+        return {
+          ok: true,
+          text: async () => '<div class="branch-action-item branch-action-item-simple"><h3 class="status-heading">All checks have passed</h3></div>',
+          headers: { get: () => "text/html" }
+        };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      throw new Error(`Unexpected url ${value}`);
+    }
+  });
+
+  await app.init();
+  assert.equal(pullDetailFetches, 1);
+  const firstCacheEntry = storage.getEnvelope().detailCache["acme/api#1"];
+  assert.equal(firstCacheEntry.updatedAt > 1234, true);
+  assert.equal(firstCacheEntry.headSha, sha);
+
+  pullDetailFetches = 0;
+  await app.refresh(false);
+  assert.equal(pullDetailFetches, 0);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"].updatedAt, firstCacheEntry.updatedAt);
+});
+
+test("current-head status failures are not cached as verified head-aware entries and retry on the next refresh", async () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: { updatedAt: 1, items: [] },
+    detailCache: {}
+  });
+  let checksFetches = 0;
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => {
+      const value = String(url);
+      if (value.includes("/pulls")) {
+        return {
+          ok: true,
+          text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]).replace(
+            "</div>",
+            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
+          )
+        };
+      }
+      if (value.endsWith("/pull/1")) {
+        return {
+          ok: true,
+          text: async () => `
+            <html><body>
+              <div class="mergeability-details">
+                <div class="branch-action-item"><h3 class="status-heading">Some checks failed</h3></div>
+                <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
+              </div>
+            </body></html>`
+        };
+      }
+      if (value.includes(`/commit/${sha}/status-details`)) {
+        checksFetches += 1;
+        return { ok: false, status: 503, headers: { get: () => "text/html" } };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      throw new Error(`Unexpected url ${value}`);
+    }
+  });
+
+  await app.init();
+  assert.equal(checksFetches, 1);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
+
+  await app.refresh(false);
+  assert.equal(checksFetches, 2);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
+});
+
+test("refresh merges per-key cache writes into latest storage without reviving deleted or overwriting newer entries", async () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: { updatedAt: 1, items: [] },
+    detailCache: {
+      "acme/api#1": {
+        updatedAt: 50,
+        parserVersion: DETAIL_PARSER_VERSION,
+        detail: { checks: "passing" },
+        headSha: "",
+        checksUrl: ""
+      },
+      "acme/api#2": {
+        updatedAt: 60,
+        parserVersion: DETAIL_PARSER_VERSION,
+        detail: { checks: "passing" },
+        headSha: "",
+        checksUrl: ""
+      }
+    }
+  });
+  let releasePull;
+  const gate = new Promise((resolve) => {
+    releasePull = resolve;
+  });
+  const originalLoad = storage.load;
+  let loadCount = 0;
+  storage.load = async () => {
+    const value = await originalLoad();
+    loadCount += 1;
+    if (loadCount === 2) {
+      storage.getEnvelope().detailCache["acme/api#2"] = {
+        updatedAt: Date.now() + 1000,
+        parserVersion: DETAIL_PARSER_VERSION,
+        detail: { checks: "failing" },
+        headSha: "",
+        checksUrl: ""
+      };
+      storage.getEnvelope().detailCache["acme/api#3"] = {
+        updatedAt: 77,
+        parserVersion: DETAIL_PARSER_VERSION,
+        detail: { checks: "pending" },
+        headSha: "",
+        checksUrl: ""
+      };
+      delete storage.getEnvelope().detailCache["acme/api#1"];
+    }
+    return value;
+  };
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => {
+      const value = String(url);
+      if (value.includes("/pulls")) {
+        await gate;
+        return {
+          ok: true,
+          text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]).replace(
+            "</div>",
+            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
+          )
+        };
+      }
+      if (value.endsWith("/pull/1")) {
+        return { ok: true, text: async () => "<html><body></body></html>" };
+      }
+      if (value.includes(`/commit/${sha}/status-details`)) {
+        return {
+          ok: true,
+          text: async () => '<div class="branch-action-item branch-action-item-simple"><h3 class="status-heading">All checks have passed</h3></div>',
+          headers: { get: () => "text/html" }
+        };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      throw new Error(`Unexpected url ${value}`);
+    }
+  });
+
+  const initPromise = app.init();
+  releasePull();
+  await initPromise;
+
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"], undefined);
+  assert.equal(storage.getEnvelope().detailCache["acme/api#2"].detail.checks, "failing");
+  assert.equal(storage.getEnvelope().detailCache["acme/api#3"].detail.checks, "pending");
+});
+
 test("default sort is updated desc then repository asc with invalid timestamps last", async () => {
   const dom = makeDom("https://github.toasttab.com/pulls");
   const storage = makeStorage({

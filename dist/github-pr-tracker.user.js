@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.0
+// @version      1.7.1
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.0
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.1
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -21,7 +21,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 6;
+  var DETAIL_PARSER_VERSION = 7;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -238,7 +238,7 @@
       return "";
     }
     const heading = root.querySelector?.(".status-heading");
-    if (heading && /\bchecks?\b/i.test(heading.textContent || "")) {
+    if (heading && (/\bchecks?\b/i.test(heading.textContent || "") || /all checks have passed/i.test(heading.textContent || ""))) {
       const meta = heading.parentElement?.querySelector?.(".status-meta");
       return [heading.className, heading.textContent, meta?.className, meta?.textContent].filter(Boolean).join(" ");
     }
@@ -273,6 +273,14 @@
         return nestedRollup;
       }
       return null;
+    }
+    const standaloneCurrentRollup = [...doc.querySelectorAll(".branch-action-item, .branch-action-item-simple")].find((item) => {
+      const heading = item.querySelector(".status-heading")?.textContent || "";
+      const meta = item.querySelector(".status-meta")?.textContent || "";
+      return /\bchecks?\b|all checks have passed|some checks failed|no checks/i.test(`${heading} ${meta}`);
+    });
+    if (standaloneCurrentRollup) {
+      return standaloneCurrentRollup;
     }
     const explicitRollups = [...doc.querySelectorAll("[data-checks-state]")];
     if (explicitRollups.length) {
@@ -348,7 +356,13 @@
     return void 0;
   }
   function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
-    const baseOrigin = new URL(baseUrl, GITHUB_ORIGIN).origin;
+    const base = new URL(baseUrl, GITHUB_ORIGIN);
+    const baseOrigin = base.origin;
+    const baseMatch = base.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/);
+    const expectedOwner = baseMatch?.[1] || "";
+    const expectedRepo = baseMatch?.[2] || "";
+    const expectedNumber = baseMatch?.[3] || "";
+    const currentHeadSha = doc.querySelector('input[name="head_sha"]')?.getAttribute("value")?.trim() || "";
     const candidateAttributes = [
       "data-status-details-url",
       "data-checks-status-url",
@@ -357,15 +371,18 @@
       "data-url",
       "href"
     ];
+    const candidates = [];
     for (const attribute of candidateAttributes) {
       for (const node of doc.querySelectorAll(`[${attribute}]`)) {
         const value = node.getAttribute(attribute);
-        if (!value || !/\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)/.test(value)) {
-          continue;
-        }
-        const resolved = new URL(value, baseUrl).href;
-        if (new URL(resolved).origin === baseOrigin) {
-          return resolved;
+        const candidate = classifyDeferredStatusCandidate(value, baseUrl, {
+          baseOrigin,
+          expectedOwner,
+          expectedRepo,
+          expectedNumber
+        });
+        if (candidate) {
+          candidates.push(candidate);
         }
       }
     }
@@ -375,12 +392,19 @@
         /https?:\/\/[^"'\\s]+\/[^"'\\s]+\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/g
       ) || [];
       for (const match of matches) {
-        if (new URL(match).origin === baseOrigin) {
-          return match;
+        const candidate = classifyDeferredStatusCandidate(match, baseUrl, {
+          baseOrigin,
+          expectedOwner,
+          expectedRepo,
+          expectedNumber
+        });
+        if (candidate) {
+          candidates.push(candidate);
         }
       }
     }
-    return null;
+    const preferredCurrentOid = currentHeadSha ? candidates.find((candidate) => candidate.type === "commit_status_icon" && candidate.oid === currentHeadSha) : null;
+    return preferredCurrentOid?.url || candidates[0]?.url || null;
   }
   function mergeNativeDetails(primary, fallback) {
     const left = primary || {};
@@ -446,6 +470,33 @@
   function pullRequestNumber(baseUrl) {
     const match = String(baseUrl || "").match(/\/pull\/(\d+)(?:\/|$)/);
     return match ? Number(match[1]) : null;
+  }
+  function classifyDeferredStatusCandidate(value, baseUrl, { baseOrigin, expectedOwner, expectedRepo, expectedNumber }) {
+    if (!value || !/\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)/.test(value)) {
+      return null;
+    }
+    try {
+      const resolved = new URL(value, baseUrl);
+      if (resolved.origin !== baseOrigin) {
+        return null;
+      }
+      const match = resolved.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/([^?#]+)$/);
+      if (!match) {
+        return null;
+      }
+      const [, owner, repo, number, suffix] = match;
+      if (owner !== expectedOwner || repo !== expectedRepo || number !== expectedNumber) {
+        return null;
+      }
+      const type = /partials\/commit_status_icon$/.test(suffix) ? "commit_status_icon" : "other";
+      return {
+        url: resolved.href,
+        type,
+        oid: type === "commit_status_icon" ? resolved.searchParams.get("oid") || "" : ""
+      };
+    } catch {
+      return null;
+    }
   }
 
   // src/models.js
@@ -587,7 +638,9 @@
       cache[key] = {
         updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : 0,
         parserVersion: Number.isFinite(value.parserVersion) ? value.parserVersion : 0,
-        detail: value.detail && typeof value.detail === "object" ? value.detail : {}
+        detail: value.detail && typeof value.detail === "object" ? value.detail : {},
+        headSha: typeof value.headSha === "string" ? value.headSha : "",
+        checksUrl: typeof value.checksUrl === "string" ? value.checksUrl : ""
       };
     }
     return cache;
@@ -1015,7 +1068,7 @@
       }
       const updatedAt = row?.querySelector("relative-time")?.getAttribute("datetime") || "";
       const draft = parseListDraftState(row, titleAnchor);
-      const listDetail = parsePullListDetail(row);
+      const listDetail = parsePullListDetail(row, parsed);
       items.push({
         key: parsed.key,
         url: parsed.url,
@@ -1117,7 +1170,7 @@
     }
     return score;
   }
-  function parsePullListDetail(row) {
+  function parsePullListDetail(row, parsed) {
     if (!row) {
       return { review: "unknown", checks: "unknown", merge: "unknown" };
     }
@@ -1158,7 +1211,73 @@
     } else if (totals && totals[1] === totals[2]) {
       checks = "passing";
     }
-    return { review, checks, merge: "unknown" };
+    const currentHead = parseCurrentHeadStatus(row, parsed);
+    return {
+      review,
+      checks,
+      merge: "unknown",
+      ...currentHead.headSha ? { headSha: currentHead.headSha } : {},
+      ...currentHead.checksUrl ? { checksUrl: currentHead.checksUrl } : {}
+    };
+  }
+  function parseCurrentHeadStatus(row, parsed) {
+    const checksUrl = resolveCurrentHeadStatusUrl(
+      row.querySelector(".commit-build-statuses[data-deferred-details-content-url], [data-deferred-details-content-url]")?.getAttribute("data-deferred-details-content-url"),
+      parsed
+    );
+    const urlHeadSha = headShaFromChecksUrl(checksUrl);
+    const attributeHeadSha = row.querySelector(".commit-build-statuses[data-head-sha], [data-head-sha]")?.getAttribute("data-head-sha")?.trim();
+    if (attributeHeadSha && urlHeadSha && attributeHeadSha.toLowerCase() !== urlHeadSha.toLowerCase()) {
+      return rejectCurrentHeadStatus();
+    }
+    return {
+      headSha: resolveCurrentHeadSha(urlHeadSha, attributeHeadSha),
+      checksUrl
+    };
+  }
+  function resolveCurrentHeadStatusUrl(value, parsed) {
+    if (!value || !parsed) {
+      return "";
+    }
+    try {
+      const url = new URL(value, GITHUB_ORIGIN);
+      if (url.origin !== GITHUB_ORIGIN) {
+        return "";
+      }
+      const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{40})\/status-details$/i);
+      if (!match) {
+        return "";
+      }
+      const [, owner, repo] = match;
+      if (owner !== parsed.owner || repo !== parsed.repo) {
+        return "";
+      }
+      if (url.searchParams.get("popover") !== "true") {
+        return "";
+      }
+      return url.href;
+    } catch {
+      return "";
+    }
+  }
+  function headShaFromChecksUrl(checksUrl) {
+    const match = String(checksUrl || "").match(/\/commit\/([0-9a-f]{40})\/status-details(?:\?|$)/i);
+    return match ? match[1] : "";
+  }
+  function resolveCurrentHeadSha(urlHeadSha, attributeHeadSha) {
+    if (!urlHeadSha) {
+      return "";
+    }
+    if (!attributeHeadSha) {
+      return urlHeadSha;
+    }
+    return attributeHeadSha.toLowerCase() === urlHeadSha.toLowerCase() ? urlHeadSha : "";
+  }
+  function rejectCurrentHeadStatus() {
+    return {
+      headSha: "",
+      checksUrl: ""
+    };
   }
 
   // src/github-actions.js
@@ -3510,17 +3629,20 @@ select {
         const snapshot = await storage.load();
         const cachedItems = snapshot.openListCache.items || [];
         const detailCache = { ...snapshot.detailCache || {} };
+        const pendingCacheWrites = /* @__PURE__ */ new Map();
         try {
           const summaries = await fetchOpenPrs({ fetchImpl, parser, startUrl: trackerSearchUrl(login) });
           const enriched = await mapLimit(summaries, 4, async (summary) => {
             try {
               const cached = detailCache[summary.key];
-              const shouldUseCache = !force && cached && cached.parserVersion === DETAIL_PARSER_VERSION && now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
-              const detail = shouldUseCache ? cached.detail : await fetchDetail(summary);
-              detailCache[summary.key] = { updatedAt: now(), parserVersion: DETAIL_PARSER_VERSION, detail };
+              const shouldUseCache = !force && cached && cached.parserVersion === DETAIL_PARSER_VERSION && isCacheHeadMatch(cached, summary) && now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
+              const fetched = shouldUseCache ? { detail: cached.detail, cacheEntry: null } : await fetchDetail(summary);
+              if (fetched.cacheEntry) {
+                pendingCacheWrites.set(summary.key, fetched.cacheEntry);
+              }
               return {
                 ...summary,
-                ...mergeSummaryDetail(summary, detail)
+                ...mergeSummaryDetail(summary, fetched.detail)
               };
             } catch {
               return summary;
@@ -3528,7 +3650,11 @@ select {
           });
           const latest = await storage.load();
           latest.openListCache = { updatedAt: now(), items: enriched };
-          latest.detailCache = detailCache;
+          latest.detailCache = mergeDetailCache({
+            latestDetailCache: latest.detailCache || {},
+            snapshotDetailCache: detailCache,
+            pendingCacheWrites
+          });
           await storage.save(latest);
           state.allSummaries = enriched;
           state.records = latest.records;
@@ -3563,9 +3689,11 @@ select {
       const html = await fetchHtml(fetchImpl, summary.url);
       const prDocument = parser(html, summary.url);
       let detail = parsePrDetailDocument(prDocument, summary.url);
-      const needsDeferred = detail.review === "unknown" || detail.checks === "unknown" || detail.merge === "unknown";
+      let verifiedHeadAwareChecks = false;
+      const shouldFetchCurrentHeadChecks = Boolean(summary.checksUrl);
+      const needsDeferred = shouldFetchCurrentHeadChecks || detail.review === "unknown" || detail.checks === "unknown" || detail.merge === "unknown";
       if (needsDeferred) {
-        const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
+        const deferredUrl = shouldFetchCurrentHeadChecks ? summary.checksUrl : findDeferredStatusEndpoint(prDocument, summary.url);
         if (deferredUrl && isSameOriginGitHubUrl(deferredUrl)) {
           try {
             const response = await fetchImpl(deferredUrl, {
@@ -3586,7 +3714,10 @@ select {
                   deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
                 }
               }
-              detail = mergeNativeDetails(detail, deferredDetail);
+              detail = shouldFetchCurrentHeadChecks ? mergeDeferredChecks(detail, deferredDetail) : mergeNativeDetails(detail, deferredDetail);
+              if (shouldFetchCurrentHeadChecks && deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+                verifiedHeadAwareChecks = true;
+              }
             }
           } catch {
           }
@@ -3601,7 +3732,11 @@ select {
         } catch {
         }
       }
-      return mergeNativeDetails(detail, { unresolvedThreads });
+      const mergedDetail = mergeNativeDetails(detail, { unresolvedThreads });
+      return {
+        detail: mergedDetail,
+        cacheEntry: buildDetailCacheEntry(summary, mergedDetail, verifiedHeadAwareChecks)
+      };
     }
     async function removeOpenSummary(key) {
       const latest = await storage.load();
@@ -3871,6 +4006,55 @@ GitHub's default commit title will be kept and the commit message body will be e
       result.unresolvedThreads = merged.unresolvedThreads;
     }
     return result;
+  }
+  function mergeDeferredChecks(detail, deferredDetail) {
+    const merged = mergeNativeDetails(detail, deferredDetail);
+    if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+      merged.checks = deferredDetail.checks;
+    }
+    return merged;
+  }
+  function isCacheHeadMatch(cached, summary) {
+    if (summary.headSha) {
+      return cached?.headSha === summary.headSha && (!summary.checksUrl || !cached?.checksUrl || cached.checksUrl === summary.checksUrl);
+    }
+    return true;
+  }
+  function buildDetailCacheEntry(summary, detail, verifiedHeadAwareChecks) {
+    if (summary.headSha) {
+      if (!verifiedHeadAwareChecks) {
+        return null;
+      }
+      return {
+        updatedAt: now(),
+        parserVersion: DETAIL_PARSER_VERSION,
+        detail,
+        headSha: summary.headSha,
+        checksUrl: summary.checksUrl || ""
+      };
+    }
+    return {
+      updatedAt: now(),
+      parserVersion: DETAIL_PARSER_VERSION,
+      detail,
+      headSha: "",
+      checksUrl: ""
+    };
+  }
+  function mergeDetailCache({ latestDetailCache, snapshotDetailCache, pendingCacheWrites }) {
+    const merged = { ...latestDetailCache || {} };
+    for (const [key, entry] of pendingCacheWrites.entries()) {
+      const latestEntry = merged[key];
+      const snapshotHadKey = Object.hasOwn(snapshotDetailCache, key);
+      if (!Object.hasOwn(latestDetailCache, key) && snapshotHadKey) {
+        continue;
+      }
+      if (latestEntry && Number.isFinite(latestEntry.updatedAt) && latestEntry.updatedAt > entry.updatedAt) {
+        continue;
+      }
+      merged[key] = entry;
+    }
+    return merged;
   }
 
   // src/storage.js

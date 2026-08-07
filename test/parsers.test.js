@@ -28,9 +28,14 @@ test("parsePullListDocument groups duplicate links and ignores cross-origin pagi
 });
 
 test("parsePullListDocument reads Toast Enterprise review and check signals", () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
   const doc = parseHtml(`
     <div class="Box-row">
       <a href="/acme/api/pull/12">Improve the API</a>
+      <div
+        class="commit-build-statuses"
+        data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"
+      ></div>
       <svg class="color-fg-success" aria-label="7 / 7 checks OK"></svg>
       <span>Review required before merging</span>
     </div>
@@ -48,6 +53,24 @@ test("parsePullListDocument reads Toast Enterprise review and check signals", ()
       { key: "acme/web#13", review: "unknown", checks: "failing", draft: true }
     ]
   );
+  assert.equal(result.items[0].headSha, sha);
+  assert.equal(result.items[0].checksUrl, `https://github.toasttab.com/acme/api/commit/${sha}/status-details?popover=true`);
+});
+
+test("parsePullListDocument rejects mismatched data-head-sha against the validated status-details url", () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const doc = parseHtml(`
+    <div class="Box-row">
+      <a href="/acme/api/pull/12">Improve the API</a>
+      <div
+        class="commit-build-statuses"
+        data-head-sha="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"
+      ></div>
+    </div>
+  `);
+  assert.equal(parsePullListDocument(doc).items[0].headSha, undefined);
+  assert.equal(parsePullListDocument(doc).items[0].checksUrl, undefined);
 });
 
 test("parsePullListDocument isolates checks from generic review and merge icons", () => {
@@ -263,6 +286,32 @@ test("detail parser reads current GitHub check rollup fragments", async () => {
   );
 });
 
+test("detail parser reads standalone current-head status-details markup", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <div class="branch-action-item branch-action-item-simple">
+      <h3 class="status-heading">All checks have passed</h3>
+      <span class="status-meta">7 successful checks</span>
+    </div>
+  `));
+  assert.equal(detail.checks, "passing");
+});
+
+test("detail parser keeps mergeability checks ahead of historical standalone branch-action items", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <div class="branch-action-item branch-action-item-simple">
+      <h3 class="status-heading">Some checks failed</h3>
+      <span class="status-meta">historical</span>
+    </div>
+    <div class="mergeability-details">
+      <div class="branch-action-item">
+        <h3 class="status-heading">All checks have passed</h3>
+        <span class="status-meta">7 successful checks</span>
+      </div>
+    </div>
+  `));
+  assert.equal(detail.checks, "passing");
+});
+
 test("detail parser reads current GitHub reviewer approval text", () => {
   const doc = parseHtml(`
     <div data-url="/acme/api/issues/12/show_partial?partial=pull_requests%2Fsidebar%2Fshow%2Freviewers">
@@ -342,6 +391,22 @@ test("findDeferredStatusEndpoint returns only same-origin current-status URLs fr
   const doc = parseHtml(await fixture("detail-history-only.html"), "https://github.toasttab.com/acme/api/pull/12");
   assert.equal(findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"), "https://github.toasttab.com/acme/api/pull/12/status");
   assert.equal(isSameOriginGitHubUrl("https://evil.example/acme/api/pull/12/status"), false);
+});
+
+test("findDeferredStatusEndpoint scopes to the current PR and prefers the current head oid", () => {
+  const doc = parseHtml(`
+    <input type="hidden" name="head_sha" value="abc123">
+    <div data-url="/acme/api/pull/99/partials/commit_status_icon?oid=wrong-pr"></div>
+    <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=old111"></div>
+    <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=abc123"></div>
+    <script>
+      window.__seed = "https://github.toasttab.com/acme/other/pull/12/partials/commit_status_icon?oid=abc123";
+    </script>
+  `, "https://github.toasttab.com/acme/api/pull/12");
+  assert.equal(
+    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"),
+    "https://github.toasttab.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
+  );
 });
 
 test("ensureTrackerNav targets the pulls nav and not unrelated navs", async () => {

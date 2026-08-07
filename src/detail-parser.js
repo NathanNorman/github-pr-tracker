@@ -132,7 +132,7 @@ function checkSignalText(root) {
     return "";
   }
   const heading = root.querySelector?.(".status-heading");
-  if (heading && /\bchecks?\b/i.test(heading.textContent || "")) {
+  if (heading && (/\bchecks?\b/i.test(heading.textContent || "") || /all checks have passed/i.test(heading.textContent || ""))) {
     const meta = heading.parentElement?.querySelector?.(".status-meta");
     return [heading.className, heading.textContent, meta?.className, meta?.textContent]
       .filter(Boolean)
@@ -170,6 +170,15 @@ function findCurrentCheckRoot(doc) {
       return nestedRollup;
     }
     return null;
+  }
+
+  const standaloneCurrentRollup = [...doc.querySelectorAll(".branch-action-item, .branch-action-item-simple")].find((item) => {
+    const heading = item.querySelector(".status-heading")?.textContent || "";
+    const meta = item.querySelector(".status-meta")?.textContent || "";
+    return /\bchecks?\b|all checks have passed|some checks failed|no checks/i.test(`${heading} ${meta}`);
+  });
+  if (standaloneCurrentRollup) {
+    return standaloneCurrentRollup;
   }
 
   const explicitRollups = [...doc.querySelectorAll("[data-checks-state]")];
@@ -271,7 +280,13 @@ export function parseUnresolvedThreadCountDocument(doc) {
 }
 
 export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
-  const baseOrigin = new URL(baseUrl, GITHUB_ORIGIN).origin;
+  const base = new URL(baseUrl, GITHUB_ORIGIN);
+  const baseOrigin = base.origin;
+  const baseMatch = base.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/);
+  const expectedOwner = baseMatch?.[1] || "";
+  const expectedRepo = baseMatch?.[2] || "";
+  const expectedNumber = baseMatch?.[3] || "";
+  const currentHeadSha = doc.querySelector('input[name="head_sha"]')?.getAttribute("value")?.trim() || "";
   const candidateAttributes = [
     "data-status-details-url",
     "data-checks-status-url",
@@ -281,18 +296,18 @@ export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
     "href"
   ];
 
+  const candidates = [];
   for (const attribute of candidateAttributes) {
     for (const node of doc.querySelectorAll(`[${attribute}]`)) {
       const value = node.getAttribute(attribute);
-      if (
-        !value ||
-        !/\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)/.test(value)
-      ) {
-        continue;
-      }
-      const resolved = new URL(value, baseUrl).href;
-      if (new URL(resolved).origin === baseOrigin) {
-        return resolved;
+      const candidate = classifyDeferredStatusCandidate(value, baseUrl, {
+        baseOrigin,
+        expectedOwner,
+        expectedRepo,
+        expectedNumber
+      });
+      if (candidate) {
+        candidates.push(candidate);
       }
     }
   }
@@ -303,13 +318,22 @@ export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN) {
       /https?:\/\/[^"'\\s]+\/[^"'\\s]+\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/g
     ) || [];
     for (const match of matches) {
-      if (new URL(match).origin === baseOrigin) {
-        return match;
+      const candidate = classifyDeferredStatusCandidate(match, baseUrl, {
+        baseOrigin,
+        expectedOwner,
+        expectedRepo,
+        expectedNumber
+      });
+      if (candidate) {
+        candidates.push(candidate);
       }
     }
   }
 
-  return null;
+  const preferredCurrentOid = currentHeadSha
+    ? candidates.find((candidate) => candidate.type === "commit_status_icon" && candidate.oid === currentHeadSha)
+    : null;
+  return preferredCurrentOid?.url || candidates[0]?.url || null;
 }
 
 export function mergeNativeDetails(primary, fallback) {
@@ -392,4 +416,32 @@ function matchesPullRequestNumber(candidate, expectedNumber, requireIdentity = f
 function pullRequestNumber(baseUrl) {
   const match = String(baseUrl || "").match(/\/pull\/(\d+)(?:\/|$)/);
   return match ? Number(match[1]) : null;
+}
+
+function classifyDeferredStatusCandidate(value, baseUrl, { baseOrigin, expectedOwner, expectedRepo, expectedNumber }) {
+  if (!value || !/\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)/.test(value)) {
+    return null;
+  }
+  try {
+    const resolved = new URL(value, baseUrl);
+    if (resolved.origin !== baseOrigin) {
+      return null;
+    }
+    const match = resolved.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/([^?#]+)$/);
+    if (!match) {
+      return null;
+    }
+    const [, owner, repo, number, suffix] = match;
+    if (owner !== expectedOwner || repo !== expectedRepo || number !== expectedNumber) {
+      return null;
+    }
+    const type = /partials\/commit_status_icon$/.test(suffix) ? "commit_status_icon" : "other";
+    return {
+      url: resolved.href,
+      type,
+      oid: type === "commit_status_icon" ? resolved.searchParams.get("oid") || "" : ""
+    };
+  } catch {
+    return null;
+  }
 }

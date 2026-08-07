@@ -44,11 +44,20 @@ function makeGm(initialValue = null) {
 test("normalizeEnvelope namespaces records for account", () => {
   const envelope = normalizeEnvelope({
     records: { "acme/api#1": { status: "next_up" } },
-    detailCache: { "acme/api#1": { updatedAt: 4, parserVersion: 2, detail: { checks: "passing" } } }
+    detailCache: {
+      "acme/api#1": {
+        updatedAt: 4,
+        parserVersion: 2,
+        detail: { checks: "passing" },
+        headSha: "abc123",
+        checksUrl: "https://github.toasttab.com/acme/api/commit/abc123/status-details?popover=true"
+      }
+    }
   }, "octocat");
   assert.equal(envelope.accountLogin, "octocat");
   assert.equal(envelope.records["acme/api#1"].status, "next_up");
   assert.equal(envelope.detailCache["acme/api#1"].parserVersion, 2);
+  assert.equal(envelope.detailCache["acme/api#1"].headSha, "abc123");
   assert.deepEqual(envelope.sortPreferences, DEFAULT_SORT_PREFERENCES);
   assert.deepEqual(envelope.filterPreferences, DEFAULT_FILTER_PREFERENCES);
 });

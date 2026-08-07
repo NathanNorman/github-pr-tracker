@@ -241,6 +241,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       const snapshot = await storage.load();
       const cachedItems = snapshot.openListCache.items || [];
       const detailCache = { ...(snapshot.detailCache || {}) };
+      const pendingCacheWrites = new Map();
 
       try {
         const summaries = await fetchOpenPrs({ fetchImpl, parser, startUrl: trackerSearchUrl(login) });
@@ -251,12 +252,15 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
               !force &&
               cached &&
               cached.parserVersion === DETAIL_PARSER_VERSION &&
+              isCacheHeadMatch(cached, summary) &&
               now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
-            const detail = shouldUseCache ? cached.detail : await fetchDetail(summary);
-            detailCache[summary.key] = { updatedAt: now(), parserVersion: DETAIL_PARSER_VERSION, detail };
+            const fetched = shouldUseCache ? { detail: cached.detail, cacheEntry: null } : await fetchDetail(summary);
+            if (fetched.cacheEntry) {
+              pendingCacheWrites.set(summary.key, fetched.cacheEntry);
+            }
             return {
               ...summary,
-              ...mergeSummaryDetail(summary, detail)
+              ...mergeSummaryDetail(summary, fetched.detail)
             };
           } catch {
             return summary;
@@ -265,7 +269,11 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
 
         const latest = await storage.load();
         latest.openListCache = { updatedAt: now(), items: enriched };
-        latest.detailCache = detailCache;
+        latest.detailCache = mergeDetailCache({
+          latestDetailCache: latest.detailCache || {},
+          snapshotDetailCache: detailCache,
+          pendingCacheWrites
+        });
         await storage.save(latest);
         state.allSummaries = enriched;
         state.records = latest.records;
@@ -302,12 +310,17 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
     const html = await fetchHtml(fetchImpl, summary.url);
     const prDocument = parser(html, summary.url);
     let detail = parsePrDetailDocument(prDocument, summary.url);
+    let verifiedHeadAwareChecks = false;
+    const shouldFetchCurrentHeadChecks = Boolean(summary.checksUrl);
     const needsDeferred =
+      shouldFetchCurrentHeadChecks ||
       detail.review === "unknown" ||
       detail.checks === "unknown" ||
       detail.merge === "unknown";
     if (needsDeferred) {
-      const deferredUrl = findDeferredStatusEndpoint(prDocument, summary.url);
+      const deferredUrl = shouldFetchCurrentHeadChecks
+        ? summary.checksUrl
+        : findDeferredStatusEndpoint(prDocument, summary.url);
       if (deferredUrl && isSameOriginGitHubUrl(deferredUrl)) {
         try {
           const response = await fetchImpl(deferredUrl, {
@@ -328,7 +341,12 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
                 deferredDetail = mergeNativeDetails(deferredDetail, { checks: "none" });
               }
             }
-            detail = mergeNativeDetails(detail, deferredDetail);
+            detail = shouldFetchCurrentHeadChecks
+              ? mergeDeferredChecks(detail, deferredDetail)
+              : mergeNativeDetails(detail, deferredDetail);
+            if (shouldFetchCurrentHeadChecks && deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+              verifiedHeadAwareChecks = true;
+            }
           }
         } catch {
           // Keep the best detail already parsed from the pull request page.
@@ -346,7 +364,11 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
         // Thread counts are best-effort and must not hide the rest of a PR.
       }
     }
-    return mergeNativeDetails(detail, { unresolvedThreads });
+    const mergedDetail = mergeNativeDetails(detail, { unresolvedThreads });
+    return {
+      detail: mergedDetail,
+      cacheEntry: buildDetailCacheEntry(summary, mergedDetail, verifiedHeadAwareChecks)
+    };
   }
 
   async function removeOpenSummary(key) {
@@ -623,4 +645,58 @@ function mergeSummaryDetail(summary, detail) {
     result.unresolvedThreads = merged.unresolvedThreads;
   }
   return result;
+}
+
+function mergeDeferredChecks(detail, deferredDetail) {
+  const merged = mergeNativeDetails(detail, deferredDetail);
+  if (deferredDetail?.checks && deferredDetail.checks !== "unknown") {
+    merged.checks = deferredDetail.checks;
+  }
+  return merged;
+}
+
+function isCacheHeadMatch(cached, summary) {
+  if (summary.headSha) {
+    return cached?.headSha === summary.headSha &&
+      (!summary.checksUrl || !cached?.checksUrl || cached.checksUrl === summary.checksUrl);
+  }
+  return true;
+}
+
+function buildDetailCacheEntry(summary, detail, verifiedHeadAwareChecks) {
+  if (summary.headSha) {
+    if (!verifiedHeadAwareChecks) {
+      return null;
+    }
+    return {
+      updatedAt: now(),
+      parserVersion: DETAIL_PARSER_VERSION,
+      detail,
+      headSha: summary.headSha,
+      checksUrl: summary.checksUrl || ""
+    };
+  }
+  return {
+    updatedAt: now(),
+    parserVersion: DETAIL_PARSER_VERSION,
+    detail,
+    headSha: "",
+    checksUrl: ""
+  };
+}
+
+function mergeDetailCache({ latestDetailCache, snapshotDetailCache, pendingCacheWrites }) {
+  const merged = { ...(latestDetailCache || {}) };
+  for (const [key, entry] of pendingCacheWrites.entries()) {
+    const latestEntry = merged[key];
+    const snapshotHadKey = Object.hasOwn(snapshotDetailCache, key);
+    if (!Object.hasOwn(latestDetailCache, key) && snapshotHadKey) {
+      continue;
+    }
+    if (latestEntry && Number.isFinite(latestEntry.updatedAt) && latestEntry.updatedAt > entry.updatedAt) {
+      continue;
+    }
+    merged[key] = entry;
+  }
+  return merged;
 }

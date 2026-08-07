@@ -93,7 +93,7 @@ export function parsePullListDocument(doc, origin = GITHUB_ORIGIN) {
     }
     const updatedAt = row?.querySelector("relative-time")?.getAttribute("datetime") || "";
     const draft = parseListDraftState(row, titleAnchor);
-    const listDetail = parsePullListDetail(row);
+    const listDetail = parsePullListDetail(row, parsed);
     items.push({
       key: parsed.key,
       url: parsed.url,
@@ -212,7 +212,7 @@ function scoreAnchor(anchor, parsed) {
   return score;
 }
 
-function parsePullListDetail(row) {
+function parsePullListDetail(row, parsed) {
   if (!row) {
     return { review: "unknown", checks: "unknown", merge: "unknown" };
   }
@@ -260,5 +260,80 @@ function parsePullListDetail(row) {
     checks = "passing";
   }
 
-  return { review, checks, merge: "unknown" };
+  const currentHead = parseCurrentHeadStatus(row, parsed);
+  return {
+    review,
+    checks,
+    merge: "unknown",
+    ...(currentHead.headSha ? { headSha: currentHead.headSha } : {}),
+    ...(currentHead.checksUrl ? { checksUrl: currentHead.checksUrl } : {})
+  };
+}
+
+function parseCurrentHeadStatus(row, parsed) {
+  const checksUrl = resolveCurrentHeadStatusUrl(
+    row.querySelector(".commit-build-statuses[data-deferred-details-content-url], [data-deferred-details-content-url]")
+      ?.getAttribute("data-deferred-details-content-url"),
+    parsed
+  );
+  const urlHeadSha = headShaFromChecksUrl(checksUrl);
+  const attributeHeadSha = row
+    .querySelector(".commit-build-statuses[data-head-sha], [data-head-sha]")
+    ?.getAttribute("data-head-sha")
+    ?.trim();
+  if (attributeHeadSha && urlHeadSha && attributeHeadSha.toLowerCase() !== urlHeadSha.toLowerCase()) {
+    return rejectCurrentHeadStatus();
+  }
+  return {
+    headSha: resolveCurrentHeadSha(urlHeadSha, attributeHeadSha),
+    checksUrl
+  };
+}
+
+function resolveCurrentHeadStatusUrl(value, parsed) {
+  if (!value || !parsed) {
+    return "";
+  }
+  try {
+    const url = new URL(value, GITHUB_ORIGIN);
+    if (url.origin !== GITHUB_ORIGIN) {
+      return "";
+    }
+    const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/commit\/([0-9a-f]{40})\/status-details$/i);
+    if (!match) {
+      return "";
+    }
+    const [, owner, repo] = match;
+    if (owner !== parsed.owner || repo !== parsed.repo) {
+      return "";
+    }
+    if (url.searchParams.get("popover") !== "true") {
+      return "";
+    }
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function headShaFromChecksUrl(checksUrl) {
+  const match = String(checksUrl || "").match(/\/commit\/([0-9a-f]{40})\/status-details(?:\?|$)/i);
+  return match ? match[1] : "";
+}
+
+function resolveCurrentHeadSha(urlHeadSha, attributeHeadSha) {
+  if (!urlHeadSha) {
+    return "";
+  }
+  if (!attributeHeadSha) {
+    return urlHeadSha;
+  }
+  return attributeHeadSha.toLowerCase() === urlHeadSha.toLowerCase() ? urlHeadSha : "";
+}
+
+function rejectCurrentHeadStatus() {
+  return {
+    headSha: "",
+    checksUrl: ""
+  };
 }
