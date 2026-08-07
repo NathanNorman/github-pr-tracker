@@ -5,6 +5,7 @@ import {
   DEFAULT_SORT_PREFERENCES,
   SORT_FIELDS,
   filterSummaries,
+  groupSummaries,
   normalizeEnvelope,
   normalizeSortPreferencesForSummaries,
   normalizeTags,
@@ -201,4 +202,53 @@ test("sortSummaries supports every exposed field and keeps unknown native states
     assert.deepEqual(sorted.map((summary) => summary.key), expected, `${field} ${direction}`);
   }
   assert.deepEqual(summaries.map((summary) => summary.key), ["beta/api#2", "acme/web#9", "acme/api#4"]);
+});
+
+test("groupSummaries creates repository sections and preserves the secondary order within each section", () => {
+  const summaries = [
+    { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Archive", updatedAt: 30 },
+    { key: "toasttab/toast-analytics#1", owner: "toasttab", repo: "toast-analytics", number: 1, title: "Older", updatedAt: 10 },
+    { key: "toasttab/toast-analytics#2", owner: "toasttab", repo: "toast-analytics", number: 2, title: "Newer", updatedAt: 20 }
+  ];
+  const sortPreferences = {
+    primary: { field: SORT_FIELDS.repository, direction: "asc" },
+    secondary: { field: SORT_FIELDS.updated, direction: "desc" }
+  };
+  const sorted = sortSummaries({ summaries, records: {}, sortPreferences });
+  const groups = groupSummaries({ summaries: sorted, records: {}, sortPreferences });
+
+  assert.deepEqual(groups.map((group) => [group.label, group.summaries.length]), [
+    ["toast-analytics", 2],
+    ["toast-archiving", 1]
+  ]);
+  assert.deepEqual(groups[0].summaries.map((summary) => summary.key), [
+    "toasttab/toast-analytics#2",
+    "toasttab/toast-analytics#1"
+  ]);
+});
+
+test("groupSummaries turns an updated primary sort into readable timeframe sections", () => {
+  const currentTime = new Date(2026, 7, 7, 16).getTime();
+  const startOfToday = new Date(currentTime);
+  startOfToday.setHours(0, 0, 0, 0);
+  const oneDay = 24 * 60 * 60 * 1000;
+  const summaries = [
+    { key: "acme/api#1", repo: "api", number: 1, updatedAt: startOfToday.getTime() + 2 * 60 * 60 * 1000 },
+    { key: "acme/api#2", repo: "api", number: 2, updatedAt: startOfToday.getTime() - oneDay + 2 * 60 * 60 * 1000 },
+    { key: "acme/api#3", repo: "api", number: 3, updatedAt: startOfToday.getTime() - 5 * oneDay },
+    { key: "acme/api#4", repo: "api", number: 4, updatedAt: "invalid" }
+  ];
+  const sortPreferences = {
+    primary: { field: SORT_FIELDS.updated, direction: "desc" },
+    secondary: { field: SORT_FIELDS.repository, direction: "asc" }
+  };
+  const sorted = sortSummaries({ summaries, records: {}, sortPreferences });
+  const groups = groupSummaries({ summaries: sorted, records: {}, sortPreferences, currentTime });
+
+  assert.deepEqual(groups.map((group) => group.label), [
+    "Updated today",
+    "Updated yesterday",
+    "Updated in the previous 7 days",
+    "Update date unavailable"
+  ]);
 });

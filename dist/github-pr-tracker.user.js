@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.3.2
+// @version      1.4.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.3.2
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.4.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -371,6 +371,27 @@
   var PERSONAL_STATUS_ORDER = new Map(PERSONAL_STATUSES.map((status, index) => [status, index]));
   var REVIEW_ORDER = new Map(REVIEW_STATES.map((status, index) => [status, index]));
   var CHECK_ORDER = new Map(CHECK_STATES.map((status, index) => [status, index]));
+  var PERSONAL_STATUS_LABELS = /* @__PURE__ */ new Map([
+    ["unsorted", "Unsorted"],
+    ["next_up", "Next up"],
+    ["waiting", "Waiting"],
+    ["blocked", "Blocked"],
+    ["done", "Done"]
+  ]);
+  var REVIEW_LABELS = /* @__PURE__ */ new Map([
+    ["approved", "Approved"],
+    ["changes_requested", "Changes requested"],
+    ["required", "Review required"],
+    ["none", "No review required"],
+    ["unknown", "Review unknown"]
+  ]);
+  var CHECK_LABELS = /* @__PURE__ */ new Map([
+    ["passing", "Checks passing"],
+    ["failing", "Checks failing"],
+    ["pending", "Checks pending"],
+    ["none", "No checks"],
+    ["unknown", "Checks unknown"]
+  ]);
   function createPrKey(owner, repo, number) {
     return `${owner}/${repo}#${number}`;
   }
@@ -493,6 +514,20 @@
       { value: SORT_FIELDS.checks, label: "Checks state" }
     ];
   }
+  function getAvailableGroupOptions(summaries) {
+    return getAvailableSortOptions(summaries).map((option) => {
+      if (option.value === SORT_FIELDS.updated) {
+        return { ...option, label: "Updated timeframe" };
+      }
+      if (option.value === SORT_FIELDS.title) {
+        return { ...option, label: "Title initial" };
+      }
+      if (option.value === SORT_FIELDS.number) {
+        return { ...option, label: "PR number range" };
+      }
+      return option;
+    });
+  }
   function normalizeSortPreferencesForSummaries(rawPreferences, summaries) {
     const availableFields = new Set(getAvailableSortOptions(summaries).map((option) => option.value));
     const normalized = normalizeSortPreferences(rawPreferences);
@@ -527,6 +562,23 @@
       }
       return compareText(left.key, right.key, SORT_DIRECTIONS.asc);
     });
+  }
+  function groupSummaries({ summaries, records, sortPreferences, currentTime = Date.now() }) {
+    const normalizedPreferences = normalizeSortPreferencesForSummaries(sortPreferences, summaries);
+    const groups = [];
+    const groupsByKey = /* @__PURE__ */ new Map();
+    for (const summary of summaries) {
+      const record = records[summary.key] || DEFAULT_RECORD;
+      const descriptor = describeGroup(normalizedPreferences.primary.field, summary, record, currentTime);
+      let group = groupsByKey.get(descriptor.key);
+      if (!group) {
+        group = { ...descriptor, summaries: [] };
+        groupsByKey.set(descriptor.key, group);
+        groups.push(group);
+      }
+      group.summaries.push(summary);
+    }
+    return groups;
   }
   function validateImportEnvelope(rawEnvelope) {
     if (!rawEnvelope || typeof rawEnvelope !== "object") {
@@ -665,6 +717,78 @@
   }
   function repositoryName(summary) {
     return [summary.owner, summary.repo].filter(Boolean).join("/");
+  }
+  function describeGroup(field, summary, record, currentTime) {
+    switch (field) {
+      case SORT_FIELDS.repository: {
+        const repository = repositoryName(summary) || "Repository unknown";
+        return { key: `repository:${repository.toLocaleLowerCase()}`, label: summary.repo || repository };
+      }
+      case SORT_FIELDS.status: {
+        const status = record.status || "unsorted";
+        return { key: `status:${status}`, label: PERSONAL_STATUS_LABELS.get(status) || humanize(status) };
+      }
+      case SORT_FIELDS.review: {
+        const review = summary.review || "unknown";
+        return { key: `review:${review}`, label: REVIEW_LABELS.get(review) || humanize(review) };
+      }
+      case SORT_FIELDS.checks: {
+        const checks = summary.checks || "unknown";
+        return { key: `checks:${checks}`, label: CHECK_LABELS.get(checks) || humanize(checks) };
+      }
+      case SORT_FIELDS.title:
+        return describeTitleGroup(summary.title);
+      case SORT_FIELDS.number:
+        return describeNumberGroup(summary.number);
+      case SORT_FIELDS.updated:
+      default:
+        return describeUpdatedGroup(summary.updatedAt, currentTime);
+    }
+  }
+  function describeUpdatedGroup(value, currentTime) {
+    const timestamp = normalizeUpdatedTimestamp(value);
+    if (timestamp === null) {
+      return { key: "updated:unknown", label: "Update date unavailable" };
+    }
+    const startOfToday = new Date(currentTime);
+    startOfToday.setHours(0, 0, 0, 0);
+    const oneDay = 24 * 60 * 60 * 1e3;
+    const today = startOfToday.getTime();
+    if (timestamp >= today) {
+      return { key: "updated:today", label: "Updated today" };
+    }
+    if (timestamp >= today - oneDay) {
+      return { key: "updated:yesterday", label: "Updated yesterday" };
+    }
+    if (timestamp >= today - 7 * oneDay) {
+      return { key: "updated:week", label: "Updated in the previous 7 days" };
+    }
+    if (timestamp >= today - 30 * oneDay) {
+      return { key: "updated:month", label: "Updated in the previous 30 days" };
+    }
+    return { key: "updated:older", label: "Updated more than 30 days ago" };
+  }
+  function describeTitleGroup(value) {
+    const firstCharacter = String(value || "").trim().charAt(0).toLocaleUpperCase();
+    if (/^[A-Z0-9]$/u.test(firstCharacter)) {
+      return { key: `title:${firstCharacter}`, label: `Titles beginning with ${firstCharacter}` };
+    }
+    return { key: "title:other", label: "Other titles" };
+  }
+  function describeNumberGroup(value) {
+    if (!Number.isFinite(value) || value < 0) {
+      return { key: "number:unknown", label: "PR number unavailable" };
+    }
+    const lower = Math.floor(value / 100) * 100;
+    const upper = lower + 99;
+    return {
+      key: `number:${lower}`,
+      label: `PRs #${lower.toLocaleString()}\u2013#${upper.toLocaleString()}`
+    };
+  }
+  function humanize(value) {
+    const label = String(value || "Unknown").replaceAll("_", " ");
+    return label.charAt(0).toLocaleUpperCase() + label.slice(1);
   }
 
   // src/github.js
@@ -1178,6 +1302,47 @@ select {
 }
 .list {
   display: grid;
+  gap: 8px;
+  background: var(--bgColor-muted, #f6f8fa);
+}
+.pr-group {
+  min-width: 0;
+  background: var(--bgColor-default, #ffffff);
+}
+.pr-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+  background: var(--bgColor-neutral-muted, rgba(175,184,193,0.14));
+}
+.pr-group-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 999px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-muted, #59636e);
+  font-size: 11px;
+  font-weight: 600;
 }
 .pr-row {
   display: grid;
@@ -1188,7 +1353,7 @@ select {
   align-items: center;
   border-top: 1px solid var(--borderColor-muted, #d8dee4);
 }
-.pr-row:first-child {
+.pr-group-header + .pr-row {
   border-top: 0;
 }
 .pr-row:hover {
@@ -1663,12 +1828,12 @@ select {
     sortSummary.textContent = "Sort";
     const sortRows = doc.createElement("div");
     sortRows.className = "sort-rows";
-    const primaryFieldSelect = makeSelect("sort-primary-field", "Primary sort field");
-    const primaryDirectionSelect = makeSelect("sort-primary-direction", "Primary sort direction");
+    const primaryFieldSelect = makeSelect("sort-primary-field", "Group field");
+    const primaryDirectionSelect = makeSelect("sort-primary-direction", "Group direction");
     const secondaryFieldSelect = makeSelect("sort-secondary-field", "Secondary sort field");
     const secondaryDirectionSelect = makeSelect("sort-secondary-direction", "Secondary sort direction");
-    const sortByRow = makeSortRow("Sort by", primaryFieldSelect, primaryDirectionSelect);
-    const thenByRow = makeSortRow("Then by", secondaryFieldSelect, secondaryDirectionSelect);
+    const sortByRow = makeSortRow("Group by", primaryFieldSelect, primaryDirectionSelect);
+    const thenByRow = makeSortRow("Then sort", secondaryFieldSelect, secondaryDirectionSelect);
     sortRows.append(sortByRow, thenByRow);
     sortMenu.append(sortSummary, sortRows);
     const refreshButton = makeActionButton("Refresh", () => handlers.onRefresh(), "action-btn");
@@ -1746,7 +1911,7 @@ select {
       }
     }
     function renderSortControls(state) {
-      syncSelectOptions(primaryFieldSelect, state.sortOptions);
+      syncSelectOptions(primaryFieldSelect, state.groupOptions);
       syncSelectOptions(secondaryFieldSelect, [{ value: "none", label: "None" }, ...state.sortOptions]);
       syncSelectOptions(primaryDirectionSelect, directionOptionsForField(state.sortPreferences.primary.field));
       syncSelectOptions(
@@ -1761,7 +1926,7 @@ select {
       }
       secondaryDirectionSelect.disabled = !state.sortPreferences.secondary;
       secondaryDirectionSelect.value = state.sortPreferences.secondary?.direction || "asc";
-      sortSummary.textContent = summarizeSort(state.sortPreferences, state.sortOptions);
+      sortSummary.textContent = summarizeSort(state.sortPreferences, state.groupOptions, state.sortOptions);
     }
     function updateWarning(message) {
       warning.hidden = !message;
@@ -1788,99 +1953,116 @@ select {
         list.append(empty);
         return;
       }
-      for (const summary of state.filteredSummaries) {
-        const record = state.records[summary.key] || DEFAULT_RECORD;
-        const row = doc.createElement("div");
-        row.className = "pr-row";
-        row.dataset.prKey = summary.key;
-        const rowButton = doc.createElement("button");
-        rowButton.type = "button";
-        rowButton.className = "pr-row-select";
-        rowButton.setAttribute("aria-selected", String(state.selectedKey === summary.key));
-        rowButton.setAttribute("aria-label", `Edit personal tracking for ${summary.title}`);
-        rowButton.addEventListener("click", () => {
-          focusedBeforeDrawer = shadow.activeElement;
-          handlers.onSelect(summary.key);
-        });
-        rowButton.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
+      for (const group of state.summaryGroups) {
+        const groupSection = doc.createElement("section");
+        groupSection.className = "pr-group";
+        groupSection.dataset.groupKey = group.key;
+        const groupHeader = doc.createElement("header");
+        groupHeader.className = "pr-group-header";
+        const groupTitle = doc.createElement("h2");
+        groupTitle.className = "pr-group-title";
+        groupTitle.textContent = group.label;
+        const groupCount = doc.createElement("span");
+        groupCount.className = "pr-group-count";
+        groupCount.textContent = String(group.summaries.length);
+        groupCount.setAttribute("aria-label", formatCount(group.summaries.length));
+        groupHeader.append(groupTitle, groupCount);
+        groupSection.append(groupHeader);
+        for (const summary of group.summaries) {
+          const record = state.records[summary.key] || DEFAULT_RECORD;
+          const row = doc.createElement("div");
+          row.className = "pr-row";
+          row.dataset.prKey = summary.key;
+          const rowButton = doc.createElement("button");
+          rowButton.type = "button";
+          rowButton.className = "pr-row-select";
+          rowButton.setAttribute("aria-selected", String(state.selectedKey === summary.key));
+          rowButton.setAttribute("aria-label", `Edit personal tracking for ${summary.title}`);
+          rowButton.addEventListener("click", () => {
             focusedBeforeDrawer = shadow.activeElement;
             handlers.onSelect(summary.key);
+          });
+          rowButton.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              focusedBeforeDrawer = shadow.activeElement;
+              handlers.onSelect(summary.key);
+            }
+          });
+          const rowIcon = doc.createElement("span");
+          rowIcon.className = "pr-icon";
+          rowIcon.setAttribute("aria-hidden", "true");
+          const rowCopy = doc.createElement("span");
+          rowCopy.className = "row-copy";
+          const repo = doc.createElement("span");
+          repo.className = "repo";
+          repo.textContent = `${summary.owner}/${summary.repo} #${summary.number}`;
+          const title = doc.createElement("span");
+          title.className = "title";
+          title.textContent = summary.title;
+          const details = doc.createElement("span");
+          details.className = "row-details";
+          if (summary.updatedAt) {
+            const updated = doc.createElement("span");
+            updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
+            details.append(updated);
           }
-        });
-        const rowIcon = doc.createElement("span");
-        rowIcon.className = "pr-icon";
-        rowIcon.setAttribute("aria-hidden", "true");
-        const rowCopy = doc.createElement("span");
-        rowCopy.className = "row-copy";
-        const repo = doc.createElement("span");
-        repo.className = "repo";
-        repo.textContent = `${summary.owner}/${summary.repo} #${summary.number}`;
-        const title = doc.createElement("span");
-        title.className = "title";
-        title.textContent = summary.title;
-        const details = doc.createElement("span");
-        details.className = "row-details";
-        if (summary.updatedAt) {
-          const updated = doc.createElement("span");
-          updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
-          details.append(updated);
-        }
-        appendKnownBadge(details, "Review", summary.review);
-        appendKnownBadge(details, "Checks", summary.checks);
-        appendKnownBadge(details, "Merge", summary.merge);
-        if (summary.draft) {
-          const draftBadge = makeBadge("Draft", "draft");
-          draftBadge.textContent = "Draft";
-          details.append(draftBadge);
-        }
-        if (record.status === "blocked" && record.blockedBy) {
-          const blocker = doc.createElement("span");
-          blocker.className = "blocker-preview";
-          blocker.textContent = `Blocked by ${record.blockedBy}`;
-          rowCopy.append(repo, title, details, blocker);
-        } else {
-          rowCopy.append(repo, title, details);
-        }
-        if (record.notes) {
-          const notePreview = doc.createElement("span");
-          notePreview.className = "note-preview";
-          notePreview.textContent = compactNote(record.notes);
-          rowCopy.append(notePreview);
-        } else if (!record.tags.length && !(record.status === "blocked" && record.blockedBy)) {
-          const personalHint = doc.createElement("span");
-          personalHint.className = "personal-hint";
-          personalHint.textContent = "Add notes, private labels, or blocker details";
-          rowCopy.append(personalHint);
-        }
-        rowButton.append(rowIcon, rowCopy);
-        const quickStatus = doc.createElement("label");
-        quickStatus.className = "quick-status";
-        quickStatus.dataset.status = record.status;
-        const quickLabel = doc.createElement("span");
-        quickLabel.className = "sr-only";
-        quickLabel.textContent = `Personal status for ${summary.title}`;
-        const statusSelect = makeStatusSelect(record.status);
-        statusSelect.className = "status-select";
-        statusSelect.addEventListener("change", () => handlers.onQuickStatus(summary.key, statusSelect.value));
-        quickStatus.append(quickLabel, statusSelect);
-        row.append(rowButton, quickStatus);
-        if (record.tags.length) {
-          const tags = doc.createElement("div");
-          tags.className = "tags row-tags";
-          for (const tag of record.tags) {
-            const tagButton = makeTagButton(tag, {
-              ariaLabel: `Filter by tag ${tag.name}`,
-              onClick() {
-                handlers.onTagFilter(tag.name);
-              }
-            });
-            tags.append(tagButton);
+          appendKnownBadge(details, "Review", summary.review);
+          appendKnownBadge(details, "Checks", summary.checks);
+          appendKnownBadge(details, "Merge", summary.merge);
+          if (summary.draft) {
+            const draftBadge = makeBadge("Draft", "draft");
+            draftBadge.textContent = "Draft";
+            details.append(draftBadge);
           }
-          row.append(tags);
+          if (record.status === "blocked" && record.blockedBy) {
+            const blocker = doc.createElement("span");
+            blocker.className = "blocker-preview";
+            blocker.textContent = `Blocked by ${record.blockedBy}`;
+            rowCopy.append(repo, title, details, blocker);
+          } else {
+            rowCopy.append(repo, title, details);
+          }
+          if (record.notes) {
+            const notePreview = doc.createElement("span");
+            notePreview.className = "note-preview";
+            notePreview.textContent = compactNote(record.notes);
+            rowCopy.append(notePreview);
+          } else if (!record.tags.length && !(record.status === "blocked" && record.blockedBy)) {
+            const personalHint = doc.createElement("span");
+            personalHint.className = "personal-hint";
+            personalHint.textContent = "Add notes, private labels, or blocker details";
+            rowCopy.append(personalHint);
+          }
+          rowButton.append(rowIcon, rowCopy);
+          const quickStatus = doc.createElement("label");
+          quickStatus.className = "quick-status";
+          quickStatus.dataset.status = record.status;
+          const quickLabel = doc.createElement("span");
+          quickLabel.className = "sr-only";
+          quickLabel.textContent = `Personal status for ${summary.title}`;
+          const statusSelect = makeStatusSelect(record.status);
+          statusSelect.className = "status-select";
+          statusSelect.addEventListener("change", () => handlers.onQuickStatus(summary.key, statusSelect.value));
+          quickStatus.append(quickLabel, statusSelect);
+          row.append(rowButton, quickStatus);
+          if (record.tags.length) {
+            const tags = doc.createElement("div");
+            tags.className = "tags row-tags";
+            for (const tag of record.tags) {
+              const tagButton = makeTagButton(tag, {
+                ariaLabel: `Filter by tag ${tag.name}`,
+                onClick() {
+                  handlers.onTagFilter(tag.name);
+                }
+              });
+              tags.append(tagButton);
+            }
+            row.append(tags);
+          }
+          groupSection.append(row);
         }
-        list.append(row);
+        list.append(groupSection);
       }
     }
     function renderDrawer(state) {
@@ -2276,13 +2458,16 @@ select {
     const text = String(value).replace(/\s+/g, " ").trim();
     return text.length > 110 ? `Note \xB7 ${text.slice(0, 107)}\u2026` : `Note \xB7 ${text}`;
   }
-  function summarizeSort(sortPreferences, sortOptions) {
-    const labels = new Map(sortOptions.map((option) => [option.value, option.label]));
+  function summarizeSort(sortPreferences, groupOptions, sortOptions) {
+    const groupLabels = new Map(groupOptions.map((option) => [option.value, option.label]));
+    const sortLabels = new Map(sortOptions.map((option) => [option.value, option.label]));
     const describe = (level) => {
-      const label = labels.get(level.field) || level.field;
+      const label = sortLabels.get(level.field) || level.field;
       return `${label} ${level.direction === "desc" ? "\u2193" : "\u2191"}`;
     };
-    return sortPreferences.secondary ? `Sort: ${describe(sortPreferences.primary)}, ${describe(sortPreferences.secondary)}` : `Sort: ${describe(sortPreferences.primary)}`;
+    const primaryLabel = groupLabels.get(sortPreferences.primary.field) || sortPreferences.primary.field;
+    const groupedBy = `${primaryLabel} ${sortPreferences.primary.direction === "desc" ? "\u2193" : "\u2191"}`;
+    return sortPreferences.secondary ? `Group: ${groupedBy} \xB7 ${describe(sortPreferences.secondary)}` : `Group: ${groupedBy}`;
   }
 
   // src/app.js
@@ -2691,9 +2876,17 @@ select {
         return;
       }
       state.filteredSummaries = computeFiltered();
+      const sortPreferences = normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries);
       ui.render({
         ...state,
-        sortPreferences: normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries),
+        sortPreferences,
+        summaryGroups: groupSummaries({
+          summaries: state.filteredSummaries,
+          records: state.records,
+          sortPreferences,
+          currentTime: now()
+        }),
+        groupOptions: getAvailableGroupOptions(state.allSummaries),
         sortOptions: getAvailableSortOptions(state.allSummaries),
         styles
       });

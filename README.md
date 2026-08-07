@@ -28,8 +28,8 @@ Fallback import steps:
 - Personal statuses are `unsorted`, `next_up`, `waiting`, `blocked`, and `done`.
 - `Show completed` reveals `done` items without mixing them into the default active views.
 - Click a private tag to filter by it.
-- Use the compact `Sort` menu to choose a primary and optional secondary order. Available fields include update time, repository, personal status, title, PR number, review state, and checks state.
-- Sorting defaults to newest updated first, then repository. Your selection is saved locally for the next visit.
+- Use the compact `Sort` menu to choose a primary group and an optional secondary order within each group. Repository grouping creates separate sections such as `toast-analytics` and `toast-archiving`; status, update timeframe, review, checks, title initial, and PR-number ranges can also be used as groups.
+- Grouping defaults to newest update timeframe first, then repository within each section. Your selection is saved locally for the next visit.
 
 ## Personal Data And Backup
 

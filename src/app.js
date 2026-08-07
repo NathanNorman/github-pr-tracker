@@ -3,7 +3,9 @@ import { findDeferredStatusEndpoint, mergeNativeDetails, parsePrDetailDocument, 
 import { fetchHtml, fetchOpenPrs, isTrackerRoute, isSameOriginGitHubUrl, trackerSearchUrl } from "./github.js";
 import {
   filterSummaries,
+  getAvailableGroupOptions,
   getAvailableSortOptions,
+  groupSummaries,
   normalizeSortPreferencesForSummaries,
   normalizeTags,
   sortSummaries
@@ -466,9 +468,17 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login }
       return;
     }
     state.filteredSummaries = computeFiltered();
+    const sortPreferences = normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries);
     ui.render({
       ...state,
-      sortPreferences: normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries),
+      sortPreferences,
+      summaryGroups: groupSummaries({
+        summaries: state.filteredSummaries,
+        records: state.records,
+        sortPreferences,
+        currentTime: now()
+      }),
+      groupOptions: getAvailableGroupOptions(state.allSummaries),
       sortOptions: getAvailableSortOptions(state.allSummaries),
       styles
     });

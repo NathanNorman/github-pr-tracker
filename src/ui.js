@@ -86,12 +86,12 @@ export function createUi(container, handlers) {
   sortSummary.textContent = "Sort";
   const sortRows = doc.createElement("div");
   sortRows.className = "sort-rows";
-  const primaryFieldSelect = makeSelect("sort-primary-field", "Primary sort field");
-  const primaryDirectionSelect = makeSelect("sort-primary-direction", "Primary sort direction");
+  const primaryFieldSelect = makeSelect("sort-primary-field", "Group field");
+  const primaryDirectionSelect = makeSelect("sort-primary-direction", "Group direction");
   const secondaryFieldSelect = makeSelect("sort-secondary-field", "Secondary sort field");
   const secondaryDirectionSelect = makeSelect("sort-secondary-direction", "Secondary sort direction");
-  const sortByRow = makeSortRow("Sort by", primaryFieldSelect, primaryDirectionSelect);
-  const thenByRow = makeSortRow("Then by", secondaryFieldSelect, secondaryDirectionSelect);
+  const sortByRow = makeSortRow("Group by", primaryFieldSelect, primaryDirectionSelect);
+  const thenByRow = makeSortRow("Then sort", secondaryFieldSelect, secondaryDirectionSelect);
   sortRows.append(sortByRow, thenByRow);
   sortMenu.append(sortSummary, sortRows);
   const refreshButton = makeActionButton("Refresh", () => handlers.onRefresh(), "action-btn");
@@ -183,7 +183,7 @@ export function createUi(container, handlers) {
   }
 
   function renderSortControls(state) {
-    syncSelectOptions(primaryFieldSelect, state.sortOptions);
+    syncSelectOptions(primaryFieldSelect, state.groupOptions);
     syncSelectOptions(secondaryFieldSelect, [{ value: "none", label: "None" }, ...state.sortOptions]);
     syncSelectOptions(primaryDirectionSelect, directionOptionsForField(state.sortPreferences.primary.field));
     syncSelectOptions(
@@ -200,7 +200,7 @@ export function createUi(container, handlers) {
     secondaryDirectionSelect.disabled = !state.sortPreferences.secondary;
     secondaryDirectionSelect.value = state.sortPreferences.secondary?.direction || "asc";
 
-    sortSummary.textContent = summarizeSort(state.sortPreferences, state.sortOptions);
+    sortSummary.textContent = summarizeSort(state.sortPreferences, state.groupOptions, state.sortOptions);
   }
 
   function updateWarning(message) {
@@ -230,7 +230,24 @@ export function createUi(container, handlers) {
       return;
     }
 
-    for (const summary of state.filteredSummaries) {
+    for (const group of state.summaryGroups) {
+      const groupSection = doc.createElement("section");
+      groupSection.className = "pr-group";
+      groupSection.dataset.groupKey = group.key;
+
+      const groupHeader = doc.createElement("header");
+      groupHeader.className = "pr-group-header";
+      const groupTitle = doc.createElement("h2");
+      groupTitle.className = "pr-group-title";
+      groupTitle.textContent = group.label;
+      const groupCount = doc.createElement("span");
+      groupCount.className = "pr-group-count";
+      groupCount.textContent = String(group.summaries.length);
+      groupCount.setAttribute("aria-label", formatCount(group.summaries.length));
+      groupHeader.append(groupTitle, groupCount);
+      groupSection.append(groupHeader);
+
+      for (const summary of group.summaries) {
       const record = state.records[summary.key] || DEFAULT_RECORD;
       const row = doc.createElement("div");
       row.className = "pr-row";
@@ -329,7 +346,9 @@ export function createUi(container, handlers) {
         row.append(tags);
       }
 
-      list.append(row);
+        groupSection.append(row);
+      }
+      list.append(groupSection);
     }
   }
 
@@ -770,13 +789,16 @@ function compactNote(value) {
   return text.length > 110 ? `Note · ${text.slice(0, 107)}…` : `Note · ${text}`;
 }
 
-function summarizeSort(sortPreferences, sortOptions) {
-  const labels = new Map(sortOptions.map((option) => [option.value, option.label]));
+function summarizeSort(sortPreferences, groupOptions, sortOptions) {
+  const groupLabels = new Map(groupOptions.map((option) => [option.value, option.label]));
+  const sortLabels = new Map(sortOptions.map((option) => [option.value, option.label]));
   const describe = (level) => {
-    const label = labels.get(level.field) || level.field;
+    const label = sortLabels.get(level.field) || level.field;
     return `${label} ${level.direction === "desc" ? "↓" : "↑"}`;
   };
+  const primaryLabel = groupLabels.get(sortPreferences.primary.field) || sortPreferences.primary.field;
+  const groupedBy = `${primaryLabel} ${sortPreferences.primary.direction === "desc" ? "↓" : "↑"}`;
   return sortPreferences.secondary
-    ? `Sort: ${describe(sortPreferences.primary)}, ${describe(sortPreferences.secondary)}`
-    : `Sort: ${describe(sortPreferences.primary)}`;
+    ? `Group: ${groupedBy} · ${describe(sortPreferences.secondary)}`
+    : `Group: ${groupedBy}`;
 }

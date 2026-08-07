@@ -40,6 +40,27 @@ const SORT_DIRECTION_SET = new Set(Object.values(SORT_DIRECTIONS));
 const PERSONAL_STATUS_ORDER = new Map(PERSONAL_STATUSES.map((status, index) => [status, index]));
 const REVIEW_ORDER = new Map(REVIEW_STATES.map((status, index) => [status, index]));
 const CHECK_ORDER = new Map(CHECK_STATES.map((status, index) => [status, index]));
+const PERSONAL_STATUS_LABELS = new Map([
+  ["unsorted", "Unsorted"],
+  ["next_up", "Next up"],
+  ["waiting", "Waiting"],
+  ["blocked", "Blocked"],
+  ["done", "Done"]
+]);
+const REVIEW_LABELS = new Map([
+  ["approved", "Approved"],
+  ["changes_requested", "Changes requested"],
+  ["required", "Review required"],
+  ["none", "No review required"],
+  ["unknown", "Review unknown"]
+]);
+const CHECK_LABELS = new Map([
+  ["passing", "Checks passing"],
+  ["failing", "Checks failing"],
+  ["pending", "Checks pending"],
+  ["none", "No checks"],
+  ["unknown", "Checks unknown"]
+]);
 
 export function createPrKey(owner, repo, number) {
   return `${owner}/${repo}#${number}`;
@@ -174,6 +195,21 @@ export function getAvailableSortOptions(summaries) {
   ];
 }
 
+export function getAvailableGroupOptions(summaries) {
+  return getAvailableSortOptions(summaries).map((option) => {
+    if (option.value === SORT_FIELDS.updated) {
+      return { ...option, label: "Updated timeframe" };
+    }
+    if (option.value === SORT_FIELDS.title) {
+      return { ...option, label: "Title initial" };
+    }
+    if (option.value === SORT_FIELDS.number) {
+      return { ...option, label: "PR number range" };
+    }
+    return option;
+  });
+}
+
 export function normalizeSortPreferencesForSummaries(rawPreferences, summaries) {
   const availableFields = new Set(getAvailableSortOptions(summaries).map((option) => option.value));
   const normalized = normalizeSortPreferences(rawPreferences);
@@ -218,6 +254,26 @@ export function sortSummaries({ summaries, records, sortPreferences }) {
       }
       return compareText(left.key, right.key, SORT_DIRECTIONS.asc);
     });
+}
+
+export function groupSummaries({ summaries, records, sortPreferences, currentTime = Date.now() }) {
+  const normalizedPreferences = normalizeSortPreferencesForSummaries(sortPreferences, summaries);
+  const groups = [];
+  const groupsByKey = new Map();
+
+  for (const summary of summaries) {
+    const record = records[summary.key] || DEFAULT_RECORD;
+    const descriptor = describeGroup(normalizedPreferences.primary.field, summary, record, currentTime);
+    let group = groupsByKey.get(descriptor.key);
+    if (!group) {
+      group = { ...descriptor, summaries: [] };
+      groupsByKey.set(descriptor.key, group);
+      groups.push(group);
+    }
+    group.summaries.push(summary);
+  }
+
+  return groups;
 }
 
 export function validateImportEnvelope(rawEnvelope) {
@@ -374,4 +430,82 @@ function compareRank(rankMap, leftValue, rightValue, direction) {
 
 function repositoryName(summary) {
   return [summary.owner, summary.repo].filter(Boolean).join("/");
+}
+
+function describeGroup(field, summary, record, currentTime) {
+  switch (field) {
+    case SORT_FIELDS.repository: {
+      const repository = repositoryName(summary) || "Repository unknown";
+      return { key: `repository:${repository.toLocaleLowerCase()}`, label: summary.repo || repository };
+    }
+    case SORT_FIELDS.status: {
+      const status = record.status || "unsorted";
+      return { key: `status:${status}`, label: PERSONAL_STATUS_LABELS.get(status) || humanize(status) };
+    }
+    case SORT_FIELDS.review: {
+      const review = summary.review || "unknown";
+      return { key: `review:${review}`, label: REVIEW_LABELS.get(review) || humanize(review) };
+    }
+    case SORT_FIELDS.checks: {
+      const checks = summary.checks || "unknown";
+      return { key: `checks:${checks}`, label: CHECK_LABELS.get(checks) || humanize(checks) };
+    }
+    case SORT_FIELDS.title:
+      return describeTitleGroup(summary.title);
+    case SORT_FIELDS.number:
+      return describeNumberGroup(summary.number);
+    case SORT_FIELDS.updated:
+    default:
+      return describeUpdatedGroup(summary.updatedAt, currentTime);
+  }
+}
+
+function describeUpdatedGroup(value, currentTime) {
+  const timestamp = normalizeUpdatedTimestamp(value);
+  if (timestamp === null) {
+    return { key: "updated:unknown", label: "Update date unavailable" };
+  }
+
+  const startOfToday = new Date(currentTime);
+  startOfToday.setHours(0, 0, 0, 0);
+  const oneDay = 24 * 60 * 60 * 1000;
+  const today = startOfToday.getTime();
+  if (timestamp >= today) {
+    return { key: "updated:today", label: "Updated today" };
+  }
+  if (timestamp >= today - oneDay) {
+    return { key: "updated:yesterday", label: "Updated yesterday" };
+  }
+  if (timestamp >= today - 7 * oneDay) {
+    return { key: "updated:week", label: "Updated in the previous 7 days" };
+  }
+  if (timestamp >= today - 30 * oneDay) {
+    return { key: "updated:month", label: "Updated in the previous 30 days" };
+  }
+  return { key: "updated:older", label: "Updated more than 30 days ago" };
+}
+
+function describeTitleGroup(value) {
+  const firstCharacter = String(value || "").trim().charAt(0).toLocaleUpperCase();
+  if (/^[A-Z0-9]$/u.test(firstCharacter)) {
+    return { key: `title:${firstCharacter}`, label: `Titles beginning with ${firstCharacter}` };
+  }
+  return { key: "title:other", label: "Other titles" };
+}
+
+function describeNumberGroup(value) {
+  if (!Number.isFinite(value) || value < 0) {
+    return { key: "number:unknown", label: "PR number unavailable" };
+  }
+  const lower = Math.floor(value / 100) * 100;
+  const upper = lower + 99;
+  return {
+    key: `number:${lower}`,
+    label: `PRs #${lower.toLocaleString()}–#${upper.toLocaleString()}`
+  };
+}
+
+function humanize(value) {
+  const label = String(value || "Unknown").replaceAll("_", " ");
+  return label.charAt(0).toLocaleUpperCase() + label.slice(1);
 }

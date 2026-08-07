@@ -330,7 +330,7 @@ test("sort menu can disable secondary sort and persists null", async () => {
   const selects = [...shadow.querySelectorAll(".sort-row select")];
   const [primaryField, primaryDirection, secondaryField] = selects;
 
-  assert.equal(primaryField.getAttribute("aria-label"), "Primary sort field");
+  assert.equal(primaryField.getAttribute("aria-label"), "Group field");
   assert.equal(primaryDirection.options[0].textContent, "Newest first");
   assert.equal([...secondaryField.options].find((option) => option.value === "updated").disabled, true);
 
@@ -343,6 +343,49 @@ test("sort menu can disable secondary sort and persists null", async () => {
 
   assert.equal(storage.getEnvelope().sortPreferences.secondary, null);
   assert.deepEqual(app.getState().filteredSummaries.map((summary) => summary.key), ["acme/api#1", "acme/api#2"]);
+});
+
+test("primary repository sorting renders separate sections and secondary updated sorting orders each section", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    sortPreferences: {
+      primary: { field: "repository", direction: "asc" },
+      secondary: { field: "updated", direction: "desc" }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Archive", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/3", updatedAt: 30 },
+        { key: "toasttab/toast-analytics#1", owner: "toasttab", repo: "toast-analytics", number: 1, title: "Older", url: "https://github.toasttab.com/toasttab/toast-analytics/pull/1", updatedAt: 10 },
+        { key: "toasttab/toast-analytics#2", owner: "toasttab", repo: "toast-analytics", number: 2, title: "Newer", url: "https://github.toasttab.com/toasttab/toast-analytics/pull/2", updatedAt: 20 }
+      ]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const groups = [...shadow.querySelectorAll(".pr-group")];
+
+  assert.deepEqual(groups.map((group) => group.querySelector(".pr-group-title").textContent), [
+    "toast-analytics",
+    "toast-archiving"
+  ]);
+  assert.equal(groups[0].querySelector(".pr-group-count").textContent, "2");
+  assert.deepEqual([...groups[0].querySelectorAll(".pr-row")].map((row) => row.dataset.prKey), [
+    "toasttab/toast-analytics#2",
+    "toasttab/toast-analytics#1"
+  ]);
+  assert.match(shadow.querySelector(".sort-summary").textContent, /Group: Repository/);
 });
 
 test("invalid nested buttons are avoided and row selection remains keyboard-accessible", async () => {
