@@ -9,7 +9,7 @@ export function isTrackerRoute(location) {
 }
 
 export function trackerUrl() {
-  return "/pulls/inbox#pr-tracker";
+  return "/pulls#pr-tracker";
 }
 
 export function detectCurrentLogin(doc = document) {

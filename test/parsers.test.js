@@ -165,11 +165,11 @@ test("ensureTrackerNav targets the pulls nav and not unrelated navs", async () =
   const trackerLink = doc.getElementById("pr-tracker-nav-link");
   assert.ok(trackerLink);
   assert.equal(trackerLink.closest("nav").getAttribute("aria-label"), "Global");
-  assert.equal(trackerLink.getAttribute("href"), "/pulls/inbox#pr-tracker");
+  assert.equal(trackerLink.getAttribute("href"), "/pulls#pr-tracker");
 });
 
-test("tracker route survives GitHub's canonical pulls inbox redirect", () => {
-  assert.equal(trackerUrl(), "/pulls/inbox#pr-tracker");
+test("tracker uses the valid Toast GitHub Enterprise pulls route", () => {
+  assert.equal(trackerUrl(), "/pulls#pr-tracker");
   assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox#pr-tracker"), true);
   assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox?pr_tracker=1"), true);
   assert.equal(isTrackerRoute("https://github.toasttab.com/pulls?pr_tracker=1"), true);
