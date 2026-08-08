@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.4
+// @version      1.7.5
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.4
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.5
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -3789,7 +3789,7 @@ select {
           const enriched = await mapLimit(summaries, 4, async (summary) => {
             try {
               const cached = detailCache[summary.key];
-              const shouldUseCache = !force && cached && cached.parserVersion === DETAIL_PARSER_VERSION && isCacheHeadMatch(cached, summary) && now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
+              const shouldUseCache = !force && cached && cached.parserVersion === DETAIL_PARSER_VERSION && isCacheHeadMatch(cached, summary) && isCacheChecksCurrent(cached, summary) && now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
               const fetched = shouldUseCache ? { detail: cached.detail, cacheEntry: null } : await fetchDetail(summary);
               if (fetched.cacheEntry) {
                 pendingCacheWrites.set(summary.key, fetched.cacheEntry);
@@ -4184,7 +4184,9 @@ GitHub's default commit title will be kept and the commit message body will be e
     const merged = mergeNativeDetails(detail, summary);
     const result = {
       review: merged.review,
-      checks: merged.checks,
+      // A green authored-list rollup is scoped to summary.headSha and is newer
+      // than a cached detail. Keep it authoritative even on cache-hit paths.
+      checks: summary.headSha && summary.checks === "passing" ? "passing" : merged.checks,
       merge: merged.merge,
       draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
     };
@@ -4205,6 +4207,12 @@ GitHub's default commit title will be kept and the commit message body will be e
       return cached?.headSha === summary.headSha && (!summary.checksUrl || !cached?.checksUrl || cached.checksUrl === summary.checksUrl);
     }
     return true;
+  }
+  function isCacheChecksCurrent(cached, summary) {
+    if (!summary.headSha) {
+      return true;
+    }
+    return summary.checks === "passing" && cached?.detail?.checks === "passing";
   }
   function buildDetailCacheEntry(summary, detail, verifiedHeadAwareChecks) {
     if (summary.headSha) {

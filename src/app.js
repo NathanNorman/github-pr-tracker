@@ -254,6 +254,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
               cached &&
               cached.parserVersion === DETAIL_PARSER_VERSION &&
               isCacheHeadMatch(cached, summary) &&
+              isCacheChecksCurrent(cached, summary) &&
               now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
             const fetched = shouldUseCache ? { detail: cached.detail, cacheEntry: null } : await fetchDetail(summary);
             if (fetched.cacheEntry) {
@@ -672,7 +673,9 @@ function mergeSummaryDetail(summary, detail) {
   const merged = mergeNativeDetails(detail, summary);
   const result = {
     review: merged.review,
-    checks: merged.checks,
+    // A green authored-list rollup is scoped to summary.headSha and is newer
+    // than a cached detail. Keep it authoritative even on cache-hit paths.
+    checks: summary.headSha && summary.checks === "passing" ? "passing" : merged.checks,
     merge: merged.merge,
     draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
   };
@@ -696,6 +699,17 @@ function isCacheHeadMatch(cached, summary) {
       (!summary.checksUrl || !cached?.checksUrl || cached.checksUrl === summary.checksUrl);
   }
   return true;
+}
+
+function isCacheChecksCurrent(cached, summary) {
+  if (!summary.headSha) {
+    return true;
+  }
+  // Check states can change without a new commit. Only reuse a head-aware
+  // cache when both the live authored rollup and cached exact-head result are
+  // green. Pending, failing, unknown, and contradictory results must be
+  // refreshed so an old red state cannot survive after GitHub turns green.
+  return summary.checks === "passing" && cached?.detail?.checks === "passing";
 }
 
 function buildDetailCacheEntry(summary, detail, verifiedHeadAwareChecks) {

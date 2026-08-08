@@ -768,6 +768,63 @@ test("detail refresh keeps a green authored-list current-head status authoritati
   assert.match(shadow.textContent, /Checks passing/);
 });
 
+test("a warm same-head failure cache cannot override a green authored-list status", async () => {
+  const sha = "1234567890abcdef1234567890abcdef12345678";
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    openListCache: { updatedAt: 1, items: [] },
+    detailCache: {
+      "acme/api#1": {
+        updatedAt: Date.now(),
+        parserVersion: DETAIL_PARSER_VERSION,
+        headSha: sha,
+        checksUrl: `https://github.toasttab.com/acme/api/commit/${sha}/status-details?popover=true`,
+        detail: { review: "approved", checks: "failing", merge: "blocked", draft: false }
+      }
+    }
+  });
+  let prFetches = 0;
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => {
+      const value = String(url);
+      if (value.includes("/pulls")) {
+        return {
+          ok: true,
+          text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]).replace(
+            "</div>",
+            `<details class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"><summary class="color-fg-success"><svg aria-label="7 / 7 checks OK" class="octicon octicon-check"></svg></summary></details></div>`
+          )
+        };
+      }
+      if (value.endsWith("/pull/1")) {
+        prFetches += 1;
+        return {
+          ok: true,
+          text: async () => '<div class="mergeability-details"><div class="branch-action-item"><h3 class="status-heading">Some checks failed</h3></div></div>'
+        };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      throw new Error(`Unexpected request: ${value}`);
+    }
+  });
+
+  await app.init();
+  assert.equal(prFetches, 1, "contradictory cached checks must be refreshed");
+  assert.equal(app.getState().allSummaries[0].checks, "passing");
+  assert.equal(storage.getEnvelope().detailCache["acme/api#1"].detail.checks, "passing");
+  const row = dom.window.document
+    .querySelector("#tm-pr-tracker-root")
+    .shadowRoot.querySelector('.pr-row[data-pr-key="acme/api#1"]');
+  assert.equal(row.dataset.checksState, "passing");
+  assert.match(row.textContent, /Checks passing/);
+});
+
 test("detail refresh prefers the exact current-head icon over stale main and historical status signals", async () => {
   const sha = "1234567890abcdef1234567890abcdef12345678";
   const oldSha = "abcdef1234567890abcdef1234567890abcdef12";
@@ -776,7 +833,15 @@ test("detail refresh prefers the exact current-head icon over stale main and his
     accountLogin: "octocat",
     records: {},
     openListCache: { updatedAt: 1, items: [] },
-    detailCache: {}
+    detailCache: {
+      "acme/api#1": {
+        updatedAt: Date.now(),
+        parserVersion: DETAIL_PARSER_VERSION,
+        headSha: sha,
+        checksUrl: `https://github.toasttab.com/acme/api/commit/${sha}/status-details?popover=true`,
+        detail: { review: "approved", checks: "failing", merge: "blocked", draft: false }
+      }
+    }
   });
   const requested = [];
   const app = buildApp({
@@ -863,7 +928,7 @@ test("detail cache preserves fetch timestamp on cache hits and misses old cache 
             draft: false
           }]).replace(
             "</div>",
-            `<div class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"></div></div>`
+            `<details class="commit-build-statuses" data-deferred-details-content-url="/acme/api/commit/${sha}/status-details?popover=true"><summary class="color-fg-success"><svg aria-label="7 / 7 checks OK" class="octicon octicon-check"></svg></summary></details></div>`
           )
         };
       }
