@@ -158,9 +158,13 @@ function findCurrentCheckRoot(doc) {
   if (mergeabilityRoot) {
     const actionItems = [...mergeabilityRoot.querySelectorAll(".branch-action-item")];
     const currentRollup = actionItems.find((item) => {
+      // Only the heading identifies which branch-action-item is actually the
+      // checks rollup. Merge-blocked / review-required items can mention the
+      // word "checks" in their meta copy (e.g. "Merging can be performed
+      // automatically once required checks pass and 1 approving review is
+      // given"), which must not be mistaken for the checks section itself.
       const heading = item.querySelector(".status-heading")?.textContent || "";
-      const meta = item.querySelector(".status-meta")?.textContent || "";
-      return /\bchecks?\b/i.test(`${heading} ${meta}`);
+      return /\bchecks?\b/i.test(heading);
     });
     if (currentRollup) {
       return currentRollup;
@@ -173,9 +177,10 @@ function findCurrentCheckRoot(doc) {
   }
 
   const standaloneCurrentRollup = [...doc.querySelectorAll(".branch-action-item, .branch-action-item-simple")].find((item) => {
+    // As above, scope to the heading only so merge-blocked/review copy that
+    // mentions "checks" in its meta text isn't mistaken for the checks item.
     const heading = item.querySelector(".status-heading")?.textContent || "";
-    const meta = item.querySelector(".status-meta")?.textContent || "";
-    return /\bchecks?\b|all checks have passed|some checks failed|no checks/i.test(`${heading} ${meta}`);
+    return /\bchecks?\b|all checks have passed|some checks failed|no checks/i.test(heading);
   });
   if (standaloneCurrentRollup) {
     return standaloneCurrentRollup;

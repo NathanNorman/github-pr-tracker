@@ -26,7 +26,7 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
     detailCache: {}
   };
   window.console.error = (...args) => errors.push(args.map(String).join(" "));
-  window.GM_info = { script: { version: "1.7.5" } };
+  window.GM_info = { script: { version: "1.7.6" } };
   window.GM_getValue = async () => structuredClone(envelope);
   window.GM_setValue = async () => {};
   window.GM_addValueChangeListener = () => 1;
@@ -44,7 +44,7 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
 
   const host = window.document.querySelector("#tm-pr-tracker-root");
   assert.ok(host, errors.join("\n"));
-  assert.equal(host.dataset.trackerVersion, "1.7.5");
+  assert.equal(host.dataset.trackerVersion, "1.7.6");
   assert.ok(host.shadowRoot.querySelector(".sort-summary"), errors.join("\n"));
   assert.ok(host.shadowRoot.querySelector(".filter-summary"), errors.join("\n"));
   assert.equal(host.shadowRoot.querySelector(".pr-group-title")?.textContent, "toast-analytics");
@@ -83,7 +83,7 @@ test("built userscript keeps a green authored-list current head authoritative ov
   };
 
   window.console.error = (...args) => errors.push(args.map(String).join(" "));
-  window.GM_info = { script: { version: "1.7.5" } };
+  window.GM_info = { script: { version: "1.7.6" } };
   window.GM_getValue = async () => structuredClone(envelope);
   window.GM_setValue = async (_key, value) => {
     envelope = structuredClone(value);
@@ -122,7 +122,7 @@ test("built userscript keeps a green authored-list current head authoritative ov
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.7\.5$/m);
+  assert.match(source, /^\/\/ @version\s+1\.7\.6$/m);
   window.eval(source);
   await waitFor(
     () => envelope.detailCache["toasttab/toast-labor#704"]?.detail?.checks === "passing",
@@ -144,7 +144,7 @@ test("built userscript keeps a green authored-list current head authoritative ov
   assert.equal(envelope.detailCache["toasttab/toast-labor#704"].headSha, headSha);
   assert.equal(envelope.detailCache["toasttab/toast-labor#704"].detail.checks, "passing");
   assert.equal(requests.filter(({ url }) => url === prUrl).length, 1);
-  assert.equal(host?.dataset.trackerVersion, "1.7.5");
+  assert.equal(host?.dataset.trackerVersion, "1.7.6");
   assert.deepEqual(
     requests.filter(({ url }) => url.includes("/partials/commit_status_icon") || url.includes("/status-details")),
     []
@@ -177,7 +177,7 @@ test("built userscript keeps note and private-label editors mounted across remot
   };
 
   window.console.error = (...args) => errors.push(args.map(String).join(" "));
-  window.GM_info = { script: { version: "1.7.5" } };
+  window.GM_info = { script: { version: "1.7.6" } };
   window.GM_getValue = async () => structuredClone(envelope);
   window.GM_setValue = async (_key, value) => {
     envelope = structuredClone(value);
@@ -201,7 +201,7 @@ test("built userscript keeps note and private-label editors mounted across remot
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.7\.5$/m);
+  assert.match(source, /^\/\/ @version\s+1\.7\.6$/m);
   window.eval(source);
   await waitFor(
     () => window.document.querySelector("#tm-pr-tracker-root")?.shadowRoot?.querySelector(".pr-row-select"),

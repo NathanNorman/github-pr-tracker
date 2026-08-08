@@ -210,6 +210,31 @@ test("detail parser lets the current merge box override a stale embedded failure
   });
 });
 
+test("detail parser does not treat merge-blocked danger markers as failing checks when checks have passed", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <div data-test-selector="mergebox" class="mergeability-details">
+      <div class="branch-action-item">
+        <svg class="octicon octicon-x color-fg-danger"></svg>
+        <h3 class="status-heading">Merging is blocked</h3>
+        <span class="status-meta">Merging can be performed automatically once required checks pass and 1 approving review is given</span>
+      </div>
+      <div class="branch-action-item">
+        <svg class="octicon octicon-check color-fg-success"></svg>
+        <h3 class="status-heading">All checks have passed</h3>
+        <span class="status-meta">7 successful checks</span>
+      </div>
+      <div class="branch-action-item">
+        <svg class="octicon octicon-x color-fg-danger"></svg>
+        <h3 class="status-heading">Code owner review required</h3>
+      </div>
+    </div>
+  `));
+
+  assert.equal(detail.checks, "passing");
+  assert.equal(detail.merge, "blocked");
+  assert.equal(detail.review, "required");
+});
+
 test("detail parser ignores unrelated embedded check rollups for the current PR", () => {
   const detail = parsePrDetailDocument(parseHtml(`
     <script type="application/json" data-target="react-app.embeddedData">

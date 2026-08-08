@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.5
+// @version      1.7.6
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.5
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.6
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -263,8 +263,7 @@
       const actionItems = [...mergeabilityRoot.querySelectorAll(".branch-action-item")];
       const currentRollup = actionItems.find((item) => {
         const heading = item.querySelector(".status-heading")?.textContent || "";
-        const meta = item.querySelector(".status-meta")?.textContent || "";
-        return /\bchecks?\b/i.test(`${heading} ${meta}`);
+        return /\bchecks?\b/i.test(heading);
       });
       if (currentRollup) {
         return currentRollup;
@@ -277,8 +276,7 @@
     }
     const standaloneCurrentRollup = [...doc.querySelectorAll(".branch-action-item, .branch-action-item-simple")].find((item) => {
       const heading = item.querySelector(".status-heading")?.textContent || "";
-      const meta = item.querySelector(".status-meta")?.textContent || "";
-      return /\bchecks?\b|all checks have passed|some checks failed|no checks/i.test(`${heading} ${meta}`);
+      return /\bchecks?\b|all checks have passed|some checks failed|no checks/i.test(heading);
     });
     if (standaloneCurrentRollup) {
       return standaloneCurrentRollup;
