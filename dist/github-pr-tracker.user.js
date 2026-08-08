@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.6
+// @version      1.7.7
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.6
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.7
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -22,7 +22,7 @@
   var GITHUB_ORIGIN = "https://github.toasttab.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
-  var DETAIL_PARSER_VERSION = 9;
+  var DETAIL_PARSER_VERSION = 10;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
@@ -406,7 +406,20 @@
     if (currentHeadSha) {
       return preferredCurrentOid?.url || null;
     }
-    return candidates[0]?.url || null;
+    const dedupedCandidates = [];
+    const seenUrls = /* @__PURE__ */ new Set();
+    for (const candidate of candidates) {
+      if (seenUrls.has(candidate.url)) {
+        continue;
+      }
+      seenUrls.add(candidate.url);
+      dedupedCandidates.push(candidate);
+    }
+    const iconCandidates = dedupedCandidates.filter((candidate) => candidate.type === "commit_status_icon");
+    if (iconCandidates.length) {
+      return iconCandidates.at(-1).url;
+    }
+    return dedupedCandidates[0]?.url || null;
   }
   function mergeNativeDetails(primary, fallback) {
     const left = primary || {};

@@ -464,6 +464,43 @@ test("findDeferredStatusEndpoint uses the supplied head when merge-form metadata
   );
 });
 
+test("findDeferredStatusEndpoint picks the newest commit's status icon when no head sha is known", () => {
+  const doc = parseHtml(`
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=a9a5d890"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=71d058e3"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=ed059b18"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/reviews/1"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/title"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/body"></div>
+    <a href="/toasttab/apex-copilot/pull/30/checks"></a>
+  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30");
+  assert.equal(
+    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"),
+    "https://github.toasttab.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
+  );
+});
+
+test("findDeferredStatusEndpoint on a React-shell PR page parses all-unknown detail but selects the newest deferred commit status", () => {
+  const doc = parseHtml(`
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=a9a5d890"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=71d058e3"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=ed059b18"></div>
+    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"></div>
+    <div class="commit-build-statuses"><span class="Skeleton d-inline-block"></span></div>
+  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30");
+  assert.deepEqual(parsePrDetailDocument(doc), {
+    review: "unknown",
+    checks: "unknown",
+    merge: "unknown",
+    draft: undefined
+  });
+  assert.equal(
+    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"),
+    "https://github.toasttab.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
+  );
+});
+
 test("ensureTrackerNav targets the pulls nav and not unrelated navs", async () => {
   const doc = parseHtml(await fixture("pulls-duplicate-links.html"));
   ensureTrackerNav(doc);

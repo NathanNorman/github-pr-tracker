@@ -343,7 +343,22 @@ export function findDeferredStatusEndpoint(doc, baseUrl = GITHUB_ORIGIN, expecte
   if (currentHeadSha) {
     return preferredCurrentOid?.url || null;
   }
-  return candidates[0]?.url || null;
+
+  const dedupedCandidates = [];
+  const seenUrls = new Set();
+  for (const candidate of candidates) {
+    if (seenUrls.has(candidate.url)) {
+      continue;
+    }
+    seenUrls.add(candidate.url);
+    dedupedCandidates.push(candidate);
+  }
+
+  const iconCandidates = dedupedCandidates.filter((candidate) => candidate.type === "commit_status_icon");
+  if (iconCandidates.length) {
+    return iconCandidates.at(-1).url;
+  }
+  return dedupedCandidates[0]?.url || null;
 }
 
 export function mergeNativeDetails(primary, fallback) {
