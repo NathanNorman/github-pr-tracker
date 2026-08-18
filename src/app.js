@@ -35,6 +35,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
     tagFilter: "",
     filterPreferences: DEFAULT_FILTER_PREFERENCES,
     sortPreferences: null,
+    collapsedGroups: new Set(),
     selectedKey: null,
     prAction: { key: null, type: null, pending: false, error: "" },
     showCompleted: false,
@@ -551,6 +552,18 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
           render();
         }
       },
+      onToggleGroup(groupKey) {
+        const collapseKey = buildGroupCollapseStateKey(state.sortPreferences?.primary?.field, groupKey);
+        if (!collapseKey) {
+          return;
+        }
+        if (state.collapsedGroups.has(collapseKey)) {
+          state.collapsedGroups.delete(collapseKey);
+        } else {
+          state.collapsedGroups.add(collapseKey);
+        }
+        render();
+      },
       onSelect(key) {
         if (state.selectedKey && state.selectedKey !== key) {
           void ui?.flushPending(state.selectedKey)?.catch(() => {});
@@ -656,16 +669,21 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
     }
     state.filteredSummaries = computeFiltered();
     const sortPreferences = normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries);
+    const currentTime = now();
+    const primaryGroupField = sortPreferences.primary.field;
     ui.render({
       ...state,
-      currentTime: now(),
+      currentTime,
       sortPreferences,
       summaryGroups: groupSummaries({
         summaries: state.filteredSummaries,
         records: state.records,
         sortPreferences,
-        currentTime: now()
-      }),
+        currentTime
+      }).map((group) => ({
+        ...group,
+        collapsed: state.collapsedGroups.has(buildGroupCollapseStateKey(primaryGroupField, group.key))
+      })),
       groupOptions: getAvailableGroupOptions(state.allSummaries),
       sortOptions: getAvailableSortOptions(state.allSummaries),
       styles
@@ -683,6 +701,13 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
     flushPending: () => ui?.flushPending(),
     getState: () => state
   };
+}
+
+function buildGroupCollapseStateKey(primaryField, groupKey) {
+  if (!primaryField || !groupKey) {
+    return "";
+  }
+  return `${primaryField}::${groupKey}`;
 }
 
 function mergeSummaryDetail(summary, detail) {

@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.8.0
+// @version      1.9.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.8.0
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.9.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -2051,18 +2051,35 @@ select {
   background: var(--bgColor-default, #ffffff);
 }
 .pr-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   min-height: 38px;
-  padding: 8px 16px;
   border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
   background: var(--bgColor-neutral-muted, rgba(175,184,193,0.14));
 }
 .pr-group-title {
-  min-width: 0;
   margin: 0;
+}
+.pr-group-toggle {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.pr-group-toggle:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(175,184,193,0.08));
+}
+.pr-group-chevron {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+.pr-group-label {
+  min-width: 0;
   overflow: hidden;
   color: var(--fgColor-default, #1f2328);
   font-size: 13px;
@@ -2094,7 +2111,7 @@ select {
   align-items: center;
   border-top: 1px solid var(--borderColor-muted, #d8dee4);
 }
-.pr-group-header + .pr-row {
+.pr-group-rows > .pr-row:first-child {
   border-top: 0;
 }
 .pr-row:hover {
@@ -3820,13 +3837,34 @@ select {
         groupHeader.className = "pr-group-header";
         const groupTitle = doc.createElement("h2");
         groupTitle.className = "pr-group-title";
-        groupTitle.textContent = group.label;
+        const groupToggle = doc.createElement("button");
+        groupToggle.type = "button";
+        groupToggle.className = "pr-group-toggle";
+        groupToggle.setAttribute("aria-expanded", String(!group.collapsed));
+        groupToggle.setAttribute(
+          "aria-label",
+          `${group.collapsed ? "Expand" : "Collapse"} group ${group.label}`
+        );
+        groupToggle.setAttribute("data-focus-id", `group-toggle:${group.key}`);
+        groupToggle.addEventListener("click", () => handlers.onToggleGroup?.(group.key));
+        const groupChevron = doc.createElement("span");
+        groupChevron.className = "pr-group-chevron";
+        groupChevron.setAttribute("aria-hidden", "true");
+        groupChevron.textContent = group.collapsed ? "\u25B8" : "\u25BE";
+        const groupLabel = doc.createElement("span");
+        groupLabel.className = "pr-group-label";
+        groupLabel.textContent = group.label;
         const groupCount = doc.createElement("span");
         groupCount.className = "pr-group-count";
         groupCount.textContent = String(group.summaries.length);
         groupCount.setAttribute("aria-label", formatCount(group.summaries.length));
-        groupHeader.append(groupTitle, groupCount);
+        groupToggle.append(groupChevron, groupLabel, groupCount);
+        groupTitle.append(groupToggle);
+        groupHeader.append(groupTitle);
         groupSection.append(groupHeader);
+        const groupRows = doc.createElement("div");
+        groupRows.className = "pr-group-rows";
+        groupRows.hidden = group.collapsed;
         for (const summary of group.summaries) {
           const record = state.records[summary.key] || DEFAULT_RECORD;
           const row = doc.createElement("div");
@@ -3979,8 +4017,9 @@ select {
             }
             row.append(tags);
           }
-          groupSection.append(row);
+          groupRows.append(row);
         }
+        groupSection.append(groupRows);
         list.append(groupSection);
       }
     }
@@ -4741,6 +4780,7 @@ select {
       tagFilter: "",
       filterPreferences: DEFAULT_FILTER_PREFERENCES,
       sortPreferences: null,
+      collapsedGroups: /* @__PURE__ */ new Set(),
       selectedKey: null,
       prAction: { key: null, type: null, pending: false, error: "" },
       showCompleted: false,
@@ -5198,6 +5238,18 @@ select {
             render();
           }
         },
+        onToggleGroup(groupKey) {
+          const collapseKey = buildGroupCollapseStateKey(state.sortPreferences?.primary?.field, groupKey);
+          if (!collapseKey) {
+            return;
+          }
+          if (state.collapsedGroups.has(collapseKey)) {
+            state.collapsedGroups.delete(collapseKey);
+          } else {
+            state.collapsedGroups.add(collapseKey);
+          }
+          render();
+        },
         onSelect(key) {
           if (state.selectedKey && state.selectedKey !== key) {
             void ui?.flushPending(state.selectedKey)?.catch(() => {
@@ -5304,16 +5356,21 @@ GitHub's default commit title will be kept and the commit message body will be e
       }
       state.filteredSummaries = computeFiltered();
       const sortPreferences = normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries);
+      const currentTime = now();
+      const primaryGroupField = sortPreferences.primary.field;
       ui.render({
         ...state,
-        currentTime: now(),
+        currentTime,
         sortPreferences,
         summaryGroups: groupSummaries({
           summaries: state.filteredSummaries,
           records: state.records,
           sortPreferences,
-          currentTime: now()
-        }),
+          currentTime
+        }).map((group) => ({
+          ...group,
+          collapsed: state.collapsedGroups.has(buildGroupCollapseStateKey(primaryGroupField, group.key))
+        })),
         groupOptions: getAvailableGroupOptions(state.allSummaries),
         sortOptions: getAvailableSortOptions(state.allSummaries),
         styles
@@ -5330,6 +5387,12 @@ GitHub's default commit title will be kept and the commit message body will be e
       flushPending: () => ui?.flushPending(),
       getState: () => state
     };
+  }
+  function buildGroupCollapseStateKey(primaryField, groupKey) {
+    if (!primaryField || !groupKey) {
+      return "";
+    }
+    return `${primaryField}::${groupKey}`;
   }
   function mergeSummaryDetail(summary, detail) {
     const merged = mergeNativeDetails(detail, summary);

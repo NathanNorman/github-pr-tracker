@@ -411,180 +411,202 @@ export function createUi(container, handlers) {
       groupHeader.className = "pr-group-header";
       const groupTitle = doc.createElement("h2");
       groupTitle.className = "pr-group-title";
-      groupTitle.textContent = group.label;
+      const groupToggle = doc.createElement("button");
+      groupToggle.type = "button";
+      groupToggle.className = "pr-group-toggle";
+      groupToggle.setAttribute("aria-expanded", String(!group.collapsed));
+      groupToggle.setAttribute(
+        "aria-label",
+        `${group.collapsed ? "Expand" : "Collapse"} group ${group.label}`
+      );
+      groupToggle.setAttribute("data-focus-id", `group-toggle:${group.key}`);
+      groupToggle.addEventListener("click", () => handlers.onToggleGroup?.(group.key));
+      const groupChevron = doc.createElement("span");
+      groupChevron.className = "pr-group-chevron";
+      groupChevron.setAttribute("aria-hidden", "true");
+      groupChevron.textContent = group.collapsed ? "▸" : "▾";
+      const groupLabel = doc.createElement("span");
+      groupLabel.className = "pr-group-label";
+      groupLabel.textContent = group.label;
       const groupCount = doc.createElement("span");
       groupCount.className = "pr-group-count";
       groupCount.textContent = String(group.summaries.length);
       groupCount.setAttribute("aria-label", formatCount(group.summaries.length));
-      groupHeader.append(groupTitle, groupCount);
+      groupToggle.append(groupChevron, groupLabel, groupCount);
+      groupTitle.append(groupToggle);
+      groupHeader.append(groupTitle);
       groupSection.append(groupHeader);
+      const groupRows = doc.createElement("div");
+      groupRows.className = "pr-group-rows";
+      groupRows.hidden = group.collapsed;
 
       for (const summary of group.summaries) {
-      const record = state.records[summary.key] || DEFAULT_RECORD;
-      const row = doc.createElement("div");
-      row.className = "pr-row";
-      row.dataset.prKey = summary.key;
-      row.dataset.checksState = summary.checks || "unknown";
-      if (summary.headSha) {
-        row.dataset.headSha = summary.headSha;
-      }
+        const record = state.records[summary.key] || DEFAULT_RECORD;
+        const row = doc.createElement("div");
+        row.className = "pr-row";
+        row.dataset.prKey = summary.key;
+        row.dataset.checksState = summary.checks || "unknown";
+        if (summary.headSha) {
+          row.dataset.headSha = summary.headSha;
+        }
 
-      const rowButton = doc.createElement("button");
-      rowButton.type = "button";
-      rowButton.className = "pr-row-select";
-      rowButton.setAttribute("aria-selected", String(state.selectedKey === summary.key));
-      rowButton.setAttribute("aria-label", `Edit personal tracking for ${summary.title}`);
-      rowButton.addEventListener("click", () => {
-        focusedBeforeDrawer = shadow.activeElement;
-        handlers.onSelect(currentState?.selectedKey === summary.key ? null : summary.key);
-      });
-      rowButton.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
+        const rowButton = doc.createElement("button");
+        rowButton.type = "button";
+        rowButton.className = "pr-row-select";
+        rowButton.setAttribute("aria-selected", String(state.selectedKey === summary.key));
+        rowButton.setAttribute("aria-label", `Edit personal tracking for ${summary.title}`);
+        rowButton.addEventListener("click", () => {
           focusedBeforeDrawer = shadow.activeElement;
           handlers.onSelect(currentState?.selectedKey === summary.key ? null : summary.key);
+        });
+        rowButton.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            focusedBeforeDrawer = shadow.activeElement;
+            handlers.onSelect(currentState?.selectedKey === summary.key ? null : summary.key);
+          }
+        });
+
+        const rowIcon = doc.createElement("span");
+        rowIcon.className = "pr-icon";
+        rowIcon.setAttribute("aria-hidden", "true");
+        const rowCopy = doc.createElement("span");
+        rowCopy.className = "row-copy";
+        const headerLine = doc.createElement("span");
+        headerLine.className = "row-header";
+        const repo = doc.createElement("span");
+        repo.className = "repo";
+        repo.textContent = `${summary.owner}/${summary.repo} #${summary.number}`;
+        headerLine.append(repo);
+        const ageBadge = makeAgeBadge(summary.createdAt, state.currentTime);
+        if (ageBadge) {
+          headerLine.append(ageBadge);
         }
-      });
+        const title = doc.createElement("span");
+        title.className = "title";
+        title.textContent = summary.title;
+        const details = doc.createElement("span");
+        details.className = "row-details";
+        details.id = `pr-row-details-${renderedRowIndex}`;
+        renderedRowIndex += 1;
+        rowButton.setAttribute("aria-describedby", details.id);
 
-      const rowIcon = doc.createElement("span");
-      rowIcon.className = "pr-icon";
-      rowIcon.setAttribute("aria-hidden", "true");
-      const rowCopy = doc.createElement("span");
-      rowCopy.className = "row-copy";
-      const headerLine = doc.createElement("span");
-      headerLine.className = "row-header";
-      const repo = doc.createElement("span");
-      repo.className = "repo";
-      repo.textContent = `${summary.owner}/${summary.repo} #${summary.number}`;
-      headerLine.append(repo);
-      const ageBadge = makeAgeBadge(summary.createdAt, state.currentTime);
-      if (ageBadge) {
-        headerLine.append(ageBadge);
-      }
-      const title = doc.createElement("span");
-      title.className = "title";
-      title.textContent = summary.title;
-      const details = doc.createElement("span");
-      details.className = "row-details";
-      details.id = `pr-row-details-${renderedRowIndex}`;
-      renderedRowIndex += 1;
-      rowButton.setAttribute("aria-describedby", details.id);
-
-      const metadata = doc.createElement("span");
-      metadata.className = "row-metadata";
-      if (summary.updatedAt) {
-        const updated = doc.createElement("span");
-        updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
-        metadata.append(updated);
-      }
-      appendKnownBadge(metadata, "Merge", summary.merge, "merge");
-      if (Number.isInteger(summary.unresolvedThreads)) {
-        const threads = doc.createElement("span");
-        threads.className = "thread-count";
-        threads.textContent = `${summary.unresolvedThreads} unresolved ${summary.unresolvedThreads === 1 ? "thread" : "threads"}`;
-        metadata.append(threads);
-      }
-      if (summary.draft) {
-        const draftBadge = makeBadge("Draft", "draft");
-        draftBadge.textContent = "Draft";
-        metadata.append(draftBadge);
-      }
-      if (metadata.childElementCount) {
-        details.append(metadata);
-      }
-
-      const jiraLinks = renderJiraLinks(summary.jiraReferences);
-      if (jiraLinks) {
-        details.append(jiraLinks);
-      }
-
-      const statusLines = doc.createElement("span");
-      statusLines.className = "row-status-lines";
-      appendNativeStatus(statusLines, "review", summary.review, REVIEW_ROW_LABELS);
-      appendNativeStatus(statusLines, "checks", summary.checks, CHECK_ROW_LABELS);
-      if (statusLines.childElementCount) {
-        details.append(statusLines);
-      }
-      if (record.status === "blocked" && record.blockedBy) {
-        const blocker = doc.createElement("span");
-        blocker.className = "blocker-preview";
-        blocker.textContent = `Blocked by ${record.blockedBy}`;
-        rowCopy.append(headerLine, title, details, blocker);
-      } else {
-        rowCopy.append(headerLine, title, details);
-      }
-
-      if (record.notes) {
-        const notePreview = doc.createElement("span");
-        notePreview.className = "note-preview";
-        notePreview.textContent = compactNote(record.notes);
-        rowCopy.append(notePreview);
-      } else if (!record.tags.length && !(record.status === "blocked" && record.blockedBy)) {
-        const personalHint = doc.createElement("span");
-        personalHint.className = "personal-hint";
-        personalHint.textContent = "Add notes, private labels, or blocker details";
-        rowCopy.append(personalHint);
-      }
-      rowButton.append(rowIcon, rowCopy);
-
-      const quickStatus = doc.createElement("label");
-      quickStatus.className = "quick-status";
-      quickStatus.dataset.status = record.status;
-      const quickLabel = doc.createElement("span");
-      quickLabel.className = "sr-only";
-      quickLabel.textContent = `Personal status for ${summary.title}`;
-      const statusSelect = makeStatusSelect(record.status);
-      statusSelect.className = "status-select";
-      statusSelect.addEventListener("change", () => handlers.onQuickStatus(summary.key, statusSelect.value));
-      quickStatus.append(quickLabel, statusSelect);
-
-      const rowControls = doc.createElement("div");
-      rowControls.className = "row-controls";
-      const actionPending = Boolean(state.prAction?.pending);
-      const rowMergePending =
-        actionPending && state.prAction.key === summary.key && state.prAction.type === "merge";
-      if (summary.merge === "clean" && !summary.draft) {
-        const rowMergeButton = makeActionButton(
-          rowMergePending ? "Merging…" : "Merge",
-          () => void handlers.onMerge(summary.key),
-          "action-btn merge-action row-merge-action"
-        );
-        rowMergeButton.disabled = actionPending;
-        rowMergeButton.title = "Squash merge with an empty commit message";
-        rowMergeButton.setAttribute(
-          "aria-label",
-          `Squash and merge ${summary.owner}/${summary.repo} #${summary.number} with an empty commit message`
-        );
-        rowControls.append(rowMergeButton);
-      }
-      const openLink = doc.createElement("a");
-      openLink.className = "row-open-link";
-      openLink.href = summary.url;
-      openLink.target = "_blank";
-      openLink.rel = "noreferrer";
-      openLink.textContent = "Open ↗";
-      openLink.setAttribute("aria-label", `Open ${summary.title} on GitHub`);
-      rowControls.append(openLink, quickStatus);
-
-      row.append(rowButton, rowControls);
-
-      if (record.tags.length) {
-        const tags = doc.createElement("div");
-        tags.className = "tags row-tags";
-        for (const tag of record.tags) {
-          const tagButton = makeTagButton(tag, {
-            ariaLabel: `Filter by tag ${tag.name}`,
-            onClick() {
-              handlers.onTagFilter(tag.name);
-            }
-          });
-          tags.append(tagButton);
+        const metadata = doc.createElement("span");
+        metadata.className = "row-metadata";
+        if (summary.updatedAt) {
+          const updated = doc.createElement("span");
+          updated.textContent = `Updated ${formatRelativeTime(summary.updatedAt)}`;
+          metadata.append(updated);
         }
-        row.append(tags);
-      }
+        appendKnownBadge(metadata, "Merge", summary.merge, "merge");
+        if (Number.isInteger(summary.unresolvedThreads)) {
+          const threads = doc.createElement("span");
+          threads.className = "thread-count";
+          threads.textContent = `${summary.unresolvedThreads} unresolved ${summary.unresolvedThreads === 1 ? "thread" : "threads"}`;
+          metadata.append(threads);
+        }
+        if (summary.draft) {
+          const draftBadge = makeBadge("Draft", "draft");
+          draftBadge.textContent = "Draft";
+          metadata.append(draftBadge);
+        }
+        if (metadata.childElementCount) {
+          details.append(metadata);
+        }
 
-        groupSection.append(row);
+        const jiraLinks = renderJiraLinks(summary.jiraReferences);
+        if (jiraLinks) {
+          details.append(jiraLinks);
+        }
+
+        const statusLines = doc.createElement("span");
+        statusLines.className = "row-status-lines";
+        appendNativeStatus(statusLines, "review", summary.review, REVIEW_ROW_LABELS);
+        appendNativeStatus(statusLines, "checks", summary.checks, CHECK_ROW_LABELS);
+        if (statusLines.childElementCount) {
+          details.append(statusLines);
+        }
+        if (record.status === "blocked" && record.blockedBy) {
+          const blocker = doc.createElement("span");
+          blocker.className = "blocker-preview";
+          blocker.textContent = `Blocked by ${record.blockedBy}`;
+          rowCopy.append(headerLine, title, details, blocker);
+        } else {
+          rowCopy.append(headerLine, title, details);
+        }
+
+        if (record.notes) {
+          const notePreview = doc.createElement("span");
+          notePreview.className = "note-preview";
+          notePreview.textContent = compactNote(record.notes);
+          rowCopy.append(notePreview);
+        } else if (!record.tags.length && !(record.status === "blocked" && record.blockedBy)) {
+          const personalHint = doc.createElement("span");
+          personalHint.className = "personal-hint";
+          personalHint.textContent = "Add notes, private labels, or blocker details";
+          rowCopy.append(personalHint);
+        }
+        rowButton.append(rowIcon, rowCopy);
+
+        const quickStatus = doc.createElement("label");
+        quickStatus.className = "quick-status";
+        quickStatus.dataset.status = record.status;
+        const quickLabel = doc.createElement("span");
+        quickLabel.className = "sr-only";
+        quickLabel.textContent = `Personal status for ${summary.title}`;
+        const statusSelect = makeStatusSelect(record.status);
+        statusSelect.className = "status-select";
+        statusSelect.addEventListener("change", () => handlers.onQuickStatus(summary.key, statusSelect.value));
+        quickStatus.append(quickLabel, statusSelect);
+
+        const rowControls = doc.createElement("div");
+        rowControls.className = "row-controls";
+        const actionPending = Boolean(state.prAction?.pending);
+        const rowMergePending =
+          actionPending && state.prAction.key === summary.key && state.prAction.type === "merge";
+        if (summary.merge === "clean" && !summary.draft) {
+          const rowMergeButton = makeActionButton(
+            rowMergePending ? "Merging…" : "Merge",
+            () => void handlers.onMerge(summary.key),
+            "action-btn merge-action row-merge-action"
+          );
+          rowMergeButton.disabled = actionPending;
+          rowMergeButton.title = "Squash merge with an empty commit message";
+          rowMergeButton.setAttribute(
+            "aria-label",
+            `Squash and merge ${summary.owner}/${summary.repo} #${summary.number} with an empty commit message`
+          );
+          rowControls.append(rowMergeButton);
+        }
+        const openLink = doc.createElement("a");
+        openLink.className = "row-open-link";
+        openLink.href = summary.url;
+        openLink.target = "_blank";
+        openLink.rel = "noreferrer";
+        openLink.textContent = "Open ↗";
+        openLink.setAttribute("aria-label", `Open ${summary.title} on GitHub`);
+        rowControls.append(openLink, quickStatus);
+
+        row.append(rowButton, rowControls);
+
+        if (record.tags.length) {
+          const tags = doc.createElement("div");
+          tags.className = "tags row-tags";
+          for (const tag of record.tags) {
+            const tagButton = makeTagButton(tag, {
+              ariaLabel: `Filter by tag ${tag.name}`,
+              onClick() {
+                handlers.onTagFilter(tag.name);
+              }
+            });
+            tags.append(tagButton);
+          }
+          row.append(tags);
+        }
+
+        groupRows.append(row);
       }
+      groupSection.append(groupRows);
       list.append(groupSection);
     }
   }

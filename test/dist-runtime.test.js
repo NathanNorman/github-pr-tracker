@@ -47,7 +47,7 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
   assert.equal(host.dataset.trackerVersion, "1.7.7");
   assert.ok(host.shadowRoot.querySelector(".sort-summary"), errors.join("\n"));
   assert.ok(host.shadowRoot.querySelector(".filter-summary"), errors.join("\n"));
-  assert.equal(host.shadowRoot.querySelector(".pr-group-title")?.textContent, "toast-analytics");
+  assert.equal(host.shadowRoot.querySelector(".pr-group-label")?.textContent, "toast-analytics");
   assert.deepEqual(errors, []);
 });
 
@@ -122,7 +122,7 @@ test("built userscript keeps a green authored-list current head authoritative ov
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.7\.7$/m);
+  assert.match(source, /^\/\/ @version\s+1\.9\.0$/m);
   window.eval(source);
   await waitFor(
     () => envelope.detailCache["toasttab/toast-labor#704"]?.detail?.checks === "passing",
@@ -201,7 +201,7 @@ test("built userscript keeps note and private-label editors mounted across remot
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.7\.7$/m);
+  assert.match(source, /^\/\/ @version\s+1\.9\.0$/m);
   window.eval(source);
   await waitFor(
     () => window.document.querySelector("#tm-pr-tracker-root")?.shadowRoot?.querySelector(".pr-row-select"),
