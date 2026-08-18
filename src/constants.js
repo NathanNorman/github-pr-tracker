@@ -5,6 +5,7 @@ export const DETAIL_CACHE_TTL_MS = 10 * 60 * 1000;
 export const DETAIL_PARSER_VERSION = 10;
 export const OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 export const SAVE_DEBOUNCE_MS = 400;
+export const MAX_COLLAPSED_GROUPS = 500;
 
 export const PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
 export const ACTIVE_STATUSES = PERSONAL_STATUSES.filter((status) => status !== "done");

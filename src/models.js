@@ -3,6 +3,7 @@ import {
   CHECK_STATES,
   DEFAULT_RECORD,
   GITHUB_ORIGIN,
+  MAX_COLLAPSED_GROUPS,
   PERSONAL_STATUSES,
   REVIEW_STATES,
   SCHEMA_VERSION,
@@ -137,8 +138,29 @@ export function normalizeEnvelope(rawEnvelope, login) {
     openListCache: normalizeOpenListCache(rawEnvelope?.openListCache),
     detailCache: normalizeDetailCache(rawEnvelope?.detailCache),
     sortPreferences: normalizeSortPreferences(rawEnvelope?.sortPreferences),
-    filterPreferences: normalizeFilterPreferences(rawEnvelope?.filterPreferences)
+    filterPreferences: normalizeFilterPreferences(rawEnvelope?.filterPreferences),
+    collapsedGroups: normalizeCollapsedGroups(rawEnvelope?.collapsedGroups)
   };
+}
+
+export function normalizeCollapsedGroups(rawCollapsedGroups) {
+  const normalized = [];
+  const seen = new Set();
+  for (const value of Array.isArray(rawCollapsedGroups) ? rawCollapsedGroups : []) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const key = value.trim();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(key);
+    if (normalized.length >= MAX_COLLAPSED_GROUPS) {
+      break;
+    }
+  }
+  return normalized;
 }
 
 export function normalizeOpenListCache(rawCache) {

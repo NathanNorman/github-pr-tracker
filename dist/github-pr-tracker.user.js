@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.9.0
+// @version      1.10.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.9.0
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.10.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -25,6 +25,7 @@
   var DETAIL_PARSER_VERSION = 10;
   var OPEN_LIST_CACHE_TTL_MS = 5 * 60 * 1e3;
   var SAVE_DEBOUNCE_MS = 400;
+  var MAX_COLLAPSED_GROUPS = 500;
   var PERSONAL_STATUSES = ["unsorted", "next_up", "waiting", "blocked", "done"];
   var ACTIVE_STATUSES = PERSONAL_STATUSES.filter((status) => status !== "done");
   var REVIEW_STATES = ["approved", "changes_requested", "required", "none", "unknown"];
@@ -790,8 +791,28 @@
       openListCache: normalizeOpenListCache(rawEnvelope?.openListCache),
       detailCache: normalizeDetailCache(rawEnvelope?.detailCache),
       sortPreferences: normalizeSortPreferences(rawEnvelope?.sortPreferences),
-      filterPreferences: normalizeFilterPreferences(rawEnvelope?.filterPreferences)
+      filterPreferences: normalizeFilterPreferences(rawEnvelope?.filterPreferences),
+      collapsedGroups: normalizeCollapsedGroups(rawEnvelope?.collapsedGroups)
     };
+  }
+  function normalizeCollapsedGroups(rawCollapsedGroups) {
+    const normalized = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const value of Array.isArray(rawCollapsedGroups) ? rawCollapsedGroups : []) {
+      if (typeof value !== "string") {
+        continue;
+      }
+      const key = value.trim();
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      normalized.push(key);
+      if (normalized.length >= MAX_COLLAPSED_GROUPS) {
+        break;
+      }
+    }
+    return normalized;
   }
   function normalizeOpenListCache(rawCache) {
     const items = Array.isArray(rawCache?.items) ? rawCache.items : [];
@@ -4808,11 +4829,13 @@ select {
       state.allSummaries = envelope.openListCache.items || [];
       state.filterPreferences = normalizeFilterPreferences(envelope.filterPreferences);
       state.sortPreferences = normalizeSortPreferencesForSummaries(envelope.sortPreferences, state.allSummaries);
+      state.collapsedGroups = new Set(envelope.collapsedGroups || []);
       state.filteredSummaries = computeFiltered();
       unsubscribe = storage.subscribe((nextEnvelope) => {
         state.records = nextEnvelope.records;
         state.filterPreferences = normalizeFilterPreferences(nextEnvelope.filterPreferences);
         state.sortPreferences = normalizeSortPreferencesForSummaries(nextEnvelope.sortPreferences, state.allSummaries);
+        state.collapsedGroups = new Set(nextEnvelope.collapsedGroups || []);
         state.filteredSummaries = computeFiltered();
         render();
       });
@@ -5238,17 +5261,27 @@ select {
             render();
           }
         },
-        onToggleGroup(groupKey) {
+        async onToggleGroup(groupKey) {
           const collapseKey = buildGroupCollapseStateKey(state.sortPreferences?.primary?.field, groupKey);
           if (!collapseKey) {
             return;
           }
-          if (state.collapsedGroups.has(collapseKey)) {
-            state.collapsedGroups.delete(collapseKey);
+          const previous = state.collapsedGroups;
+          const next = new Set(previous);
+          if (next.has(collapseKey)) {
+            next.delete(collapseKey);
           } else {
-            state.collapsedGroups.add(collapseKey);
+            next.add(collapseKey);
           }
+          state.collapsedGroups = next;
           render();
+          try {
+            await storage.updateCollapsedGroups([...next]);
+          } catch (error) {
+            state.collapsedGroups = previous;
+            state.warning = `Could not save collapsed groups. ${error.message}`;
+            render();
+          }
         },
         onSelect(key) {
           if (state.selectedKey && state.selectedKey !== key) {
@@ -5558,6 +5591,18 @@ GitHub's default commit title will be kept and the commit message body will be e
       }
       return envelope;
     }
+    async function updateCollapsedGroups(collapsedGroups) {
+      const envelope = await load();
+      const nextEnvelope = {
+        ...envelope,
+        collapsedGroups: normalizeCollapsedGroups(collapsedGroups)
+      };
+      await save(nextEnvelope);
+      for (const listener of listeners) {
+        listener(nextEnvelope);
+      }
+      return nextEnvelope;
+    }
     async function importEnvelope(rawEnvelope) {
       validateImportEnvelope(rawEnvelope);
       if (rawEnvelope.accountLogin !== login) {
@@ -5580,6 +5625,7 @@ GitHub's default commit title will be kept and the commit message body will be e
       upsertRecord,
       updateSortPreferences,
       updateFilterPreferences,
+      updateCollapsedGroups,
       importEnvelope
     };
   }

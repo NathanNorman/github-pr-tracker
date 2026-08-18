@@ -65,11 +65,13 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
     state.allSummaries = envelope.openListCache.items || [];
     state.filterPreferences = normalizeFilterPreferences(envelope.filterPreferences);
     state.sortPreferences = normalizeSortPreferencesForSummaries(envelope.sortPreferences, state.allSummaries);
+    state.collapsedGroups = new Set(envelope.collapsedGroups || []);
     state.filteredSummaries = computeFiltered();
     unsubscribe = storage.subscribe((nextEnvelope) => {
       state.records = nextEnvelope.records;
       state.filterPreferences = normalizeFilterPreferences(nextEnvelope.filterPreferences);
       state.sortPreferences = normalizeSortPreferencesForSummaries(nextEnvelope.sortPreferences, state.allSummaries);
+      state.collapsedGroups = new Set(nextEnvelope.collapsedGroups || []);
       state.filteredSummaries = computeFiltered();
       render();
     });
@@ -552,17 +554,27 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
           render();
         }
       },
-      onToggleGroup(groupKey) {
+      async onToggleGroup(groupKey) {
         const collapseKey = buildGroupCollapseStateKey(state.sortPreferences?.primary?.field, groupKey);
         if (!collapseKey) {
           return;
         }
-        if (state.collapsedGroups.has(collapseKey)) {
-          state.collapsedGroups.delete(collapseKey);
+        const previous = state.collapsedGroups;
+        const next = new Set(previous);
+        if (next.has(collapseKey)) {
+          next.delete(collapseKey);
         } else {
-          state.collapsedGroups.add(collapseKey);
+          next.add(collapseKey);
         }
+        state.collapsedGroups = next;
         render();
+        try {
+          await storage.updateCollapsedGroups([...next]);
+        } catch (error) {
+          state.collapsedGroups = previous;
+          state.warning = `Could not save collapsed groups. ${error.message}`;
+          render();
+        }
       },
       onSelect(key) {
         if (state.selectedKey && state.selectedKey !== key) {

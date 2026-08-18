@@ -1,6 +1,7 @@
 import { APP_ID, DEFAULT_RECORD } from "./constants.js";
 import {
   mergeImportedRecords,
+  normalizeCollapsedGroups,
   normalizeEnvelope,
   normalizeFilterPreferences,
   normalizeRecord,
@@ -78,6 +79,19 @@ export function createStorage(gm, login) {
     return envelope;
   }
 
+  async function updateCollapsedGroups(collapsedGroups) {
+    const envelope = await load();
+    const nextEnvelope = {
+      ...envelope,
+      collapsedGroups: normalizeCollapsedGroups(collapsedGroups)
+    };
+    await save(nextEnvelope);
+    for (const listener of listeners) {
+      listener(nextEnvelope);
+    }
+    return nextEnvelope;
+  }
+
   async function importEnvelope(rawEnvelope) {
     validateImportEnvelope(rawEnvelope);
     if (rawEnvelope.accountLogin !== login) {
@@ -101,6 +115,7 @@ export function createStorage(gm, login) {
     upsertRecord,
     updateSortPreferences,
     updateFilterPreferences,
+    updateCollapsedGroups,
     importEnvelope
   };
 }

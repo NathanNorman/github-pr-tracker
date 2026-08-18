@@ -41,6 +41,13 @@ function makeStorage(seed) {
       }
       return envelope;
     },
+    async updateCollapsedGroups(collapsedGroups) {
+      envelope.collapsedGroups = [...collapsedGroups];
+      for (const callback of subscribers) {
+        callback(structuredClone(envelope));
+      }
+      return envelope;
+    },
     async importEnvelope(raw) {
       if (raw.accountLogin && raw.accountLogin !== envelope.accountLogin) {
         throw new Error(`Import account ${raw.accountLogin} does not match signed-in account ${envelope.accountLogin}.`);
@@ -1785,6 +1792,196 @@ test("collapsed group state is isolated by grouping field and restored when swit
   );
   assert.equal(apexGroupRestored.querySelector(".pr-group-toggle").getAttribute("aria-expanded"), "false");
   assert.equal(apexGroupRestored.querySelector(".pr-group-rows").hidden, true);
+});
+
+test("collapsed groups persist across app reloads and expansion removes only the selected key", async () => {
+  const dom1 = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    sortPreferences: {
+      primary: { field: "repository", direction: "asc" },
+      secondary: { field: "updated", direction: "desc" }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+      ]
+    },
+    detailCache: {},
+    collapsedGroups: []
+  });
+
+  const app1 = buildApp({
+    dom: dom1,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+  await app1.init();
+  let shadow = dom1.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const apexGroup1 = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
+  );
+  const archivingGroup1 = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+  );
+
+  apexGroup1.querySelector(".pr-group-toggle").click();
+  archivingGroup1.querySelector(".pr-group-toggle").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(storage.getEnvelope().collapsedGroups, [
+    "repository::repository:toasttab/apex-copilot",
+    "repository::repository:toasttab/toast-archiving"
+  ]);
+
+  const dom2 = makeDom();
+  const app2 = buildApp({
+    dom: dom2,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+  await app2.init();
+  shadow = dom2.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+
+  let apexGroup2 = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
+  );
+  let archivingGroup2 = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+  );
+  assert.equal(apexGroup2.querySelector(".pr-group-rows").hidden, true);
+  assert.equal(archivingGroup2.querySelector(".pr-group-rows").hidden, true);
+
+  apexGroup2.querySelector(".pr-group-toggle").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(storage.getEnvelope().collapsedGroups, [
+    "repository::repository:toasttab/toast-archiving"
+  ]);
+
+  const dom3 = makeDom();
+  const app3 = buildApp({
+    dom: dom3,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+  await app3.init();
+  shadow = dom3.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  apexGroup2 = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
+  );
+  archivingGroup2 = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+  );
+  assert.equal(apexGroup2.querySelector(".pr-group-rows").hidden, false);
+  assert.equal(archivingGroup2.querySelector(".pr-group-rows").hidden, true);
+});
+
+test("remote collapsed-group storage updates rerender and preserve later toggles", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    sortPreferences: {
+      primary: { field: "repository", direction: "asc" },
+      secondary: { field: "updated", direction: "desc" }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+      ]
+    },
+    detailCache: {},
+    collapsedGroups: []
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  await storage.updateCollapsedGroups(["repository::repository:toasttab/apex-copilot"]);
+
+  let apexGroup = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
+  );
+  assert.equal(apexGroup.querySelector(".pr-group-rows").hidden, true);
+
+  apexGroup.querySelector(".pr-group-toggle").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(storage.getEnvelope().collapsedGroups, []);
+
+  const archivingGroup = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+  );
+  archivingGroup.querySelector(".pr-group-toggle").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  apexGroup = [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
+  );
+  assert.equal(apexGroup.querySelector(".pr-group-rows").hidden, false);
+  assert.deepEqual(storage.getEnvelope().collapsedGroups, ["repository::repository:toasttab/toast-archiving"]);
+});
+
+test("failed collapsed-group persistence rolls back after an optimistic toggle and leaves the app renderable", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {},
+    sortPreferences: {
+      primary: { field: "repository", direction: "asc" },
+      secondary: { field: "updated", direction: "desc" }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+      ]
+    },
+    detailCache: {},
+    collapsedGroups: []
+  });
+  storage.updateCollapsedGroups = async () => {
+    throw new Error("disk full");
+  };
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  });
+
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const apexGroup = () => [...shadow.querySelectorAll(".pr-group")].find(
+    (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
+  );
+
+  apexGroup().querySelector(".pr-group-toggle").click();
+  assert.equal(apexGroup().querySelector(".pr-group-rows").hidden, true);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(apexGroup().querySelector(".pr-group-rows").hidden, false);
+  assert.match(shadow.textContent, /Could not save collapsed groups\. disk full/);
+  assert.equal(shadow.querySelectorAll(".pr-group").length, 2);
+  assert.deepEqual(storage.getEnvelope().collapsedGroups, []);
 });
 
 test("filter popover persists structured filters, filters before grouping, and clears them", async () => {

@@ -122,7 +122,7 @@ test("built userscript keeps a green authored-list current head authoritative ov
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.9\.0$/m);
+  assert.match(source, /^\/\/ @version\s+1\.10\.0$/m);
   window.eval(source);
   await waitFor(
     () => envelope.detailCache["toasttab/toast-labor#704"]?.detail?.checks === "passing",
@@ -201,7 +201,7 @@ test("built userscript keeps note and private-label editors mounted across remot
     throw new Error(`Unexpected request: ${url.href}`);
   };
 
-  assert.match(source, /^\/\/ @version\s+1\.9\.0$/m);
+  assert.match(source, /^\/\/ @version\s+1\.10\.0$/m);
   window.eval(source);
   await waitFor(
     () => window.document.querySelector("#tm-pr-tracker-root")?.shadowRoot?.querySelector(".pr-row-select"),

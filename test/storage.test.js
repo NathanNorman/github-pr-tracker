@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createStorage } from "../src/storage.js";
+import { MAX_COLLAPSED_GROUPS } from "../src/constants.js";
 import {
   DEFAULT_FILTER_PREFERENCES,
   DEFAULT_SORT_PREFERENCES,
   SORT_FIELDS,
   filterSummaries,
   groupSummaries,
+  normalizeCollapsedGroups,
   normalizeEnvelope,
   normalizeFilterPreferences,
   normalizeSortPreferencesForSummaries,
@@ -41,6 +43,35 @@ function makeGm(initialValue = null) {
   };
 }
 
+function makeKeyedGm(initialEntries = {}) {
+  const storedByKey = new Map(Object.entries(initialEntries));
+  let nextId = 0;
+  const listeners = new Map();
+  return {
+    gm: {
+      getValue: async (key, fallback) => (storedByKey.has(key) ? storedByKey.get(key) : fallback),
+      setValue: async (key, value) => {
+        storedByKey.set(key, value);
+      },
+      addValueChangeListener: (key, callback) => {
+        const id = nextId++;
+        listeners.set(id, { key, callback });
+        return id;
+      },
+      removeValueChangeListener: (id) => listeners.delete(id)
+    },
+    emitRemote(key, value) {
+      storedByKey.set(key, value);
+      for (const listener of listeners.values()) {
+        if (listener.key === key) {
+          listener.callback(key, null, value, true);
+        }
+      }
+    },
+    read: (key) => storedByKey.get(key)
+  };
+}
+
 test("normalizeEnvelope namespaces records for account", () => {
   const envelope = normalizeEnvelope({
     records: { "acme/api#1": { status: "next_up" } },
@@ -60,6 +91,60 @@ test("normalizeEnvelope namespaces records for account", () => {
   assert.equal(envelope.detailCache["acme/api#1"].headSha, "abc123");
   assert.deepEqual(envelope.sortPreferences, DEFAULT_SORT_PREFERENCES);
   assert.deepEqual(envelope.filterPreferences, DEFAULT_FILTER_PREFERENCES);
+  assert.deepEqual(envelope.collapsedGroups, []);
+});
+
+test("normalizeCollapsedGroups trims, deduplicates, and safely ignores malformed values", () => {
+  assert.deepEqual(normalizeCollapsedGroups(null), []);
+  assert.deepEqual(normalizeCollapsedGroups([
+    " repository:toasttab/apex-copilot ",
+    "",
+    "repository:toasttab/apex-copilot",
+    7,
+    {},
+    "status:blocked"
+  ]), [
+    "repository:toasttab/apex-copilot",
+    "status:blocked"
+  ]);
+  const capped = normalizeCollapsedGroups(
+    Array.from({ length: MAX_COLLAPSED_GROUPS + 25 }, (_value, index) => `repository:group-${index}`)
+  );
+  assert.equal(capped.length, MAX_COLLAPSED_GROUPS);
+});
+
+test("normalizeEnvelope defaults missing legacy collapsed groups safely", () => {
+  const hubot = normalizeEnvelope({ records: {} }, "hubot");
+  assert.equal(hubot.accountLogin, "hubot");
+  assert.deepEqual(hubot.collapsedGroups, []);
+});
+
+test("createStorage keeps collapsed groups isolated by account-scoped storage key", async () => {
+  const octocatStorageKey = "tm-github-pr-tracker:octocat";
+  const hubotStorageKey = "tm-github-pr-tracker:hubot";
+  const { gm } = makeKeyedGm({
+    [octocatStorageKey]: {
+      accountLogin: "octocat",
+      records: {},
+      collapsedGroups: ["repository::repository:toasttab/apex-copilot"]
+    },
+    [hubotStorageKey]: {
+      accountLogin: "hubot",
+      records: {},
+      collapsedGroups: ["status::status:blocked"]
+    }
+  });
+  const octocatStorage = createStorage(gm, "octocat");
+  const hubotStorage = createStorage(gm, "hubot");
+
+  assert.equal(octocatStorage.storageKey, octocatStorageKey);
+  assert.equal(hubotStorage.storageKey, hubotStorageKey);
+  assert.deepEqual((await octocatStorage.load()).collapsedGroups, [
+    "repository::repository:toasttab/apex-copilot"
+  ]);
+  assert.deepEqual((await hubotStorage.load()).collapsedGroups, [
+    "status::status:blocked"
+  ]);
 });
 
 test("normalizeFilterPreferences defaults missing and invalid stored values safely", () => {
@@ -230,6 +315,58 @@ test("updateSortPreferences merges a primary-only patch with the current seconda
     primary: { field: SORT_FIELDS.title, direction: "asc" },
     secondary: { field: SORT_FIELDS.repository, direction: "asc" }
   });
+});
+
+test("updateCollapsedGroups normalizes values and does not mutate the previously loaded envelope by reference", async () => {
+  const initial = {
+    accountLogin: "octocat",
+    records: {},
+    collapsedGroups: ["repository:toasttab/apex-copilot"]
+  };
+  const { gm, read } = makeGm(initial);
+  const storage = createStorage(gm, "octocat");
+  const loaded = await storage.load();
+
+  await storage.updateCollapsedGroups([
+    " repository:toasttab/apex-copilot ",
+    "status:blocked",
+    "",
+    "status:blocked"
+  ]);
+
+  assert.deepEqual(loaded.collapsedGroups, ["repository:toasttab/apex-copilot"]);
+  assert.notEqual(read(), loaded);
+  assert.deepEqual(read().collapsedGroups, [
+    "repository:toasttab/apex-copilot",
+    "status:blocked"
+  ]);
+});
+
+test("storage subscriptions normalize remote collapsed-group updates for later toggles", async () => {
+  const { gm, emitRemote } = makeGm({
+    accountLogin: "octocat",
+    records: {},
+    collapsedGroups: []
+  });
+  const storage = createStorage(gm, "octocat");
+  const notifications = [];
+  storage.subscribe((envelope) => notifications.push(envelope));
+
+  emitRemote({
+    accountLogin: "octocat",
+    records: {},
+    collapsedGroups: ["repository:toasttab/apex-copilot", "", "repository:toasttab/apex-copilot"]
+  });
+
+  assert.deepEqual(notifications.at(-1)?.collapsedGroups, ["repository:toasttab/apex-copilot"]);
+  await storage.updateCollapsedGroups([
+    ...notifications.at(-1).collapsedGroups,
+    "status:blocked"
+  ]);
+  assert.deepEqual((await storage.load()).collapsedGroups, [
+    "repository:toasttab/apex-copilot",
+    "status:blocked"
+  ]);
 });
 
 test("normalizeSortPreferencesForSummaries keeps checks available when some states are unknown", () => {
