@@ -27,6 +27,7 @@ Fallback import steps:
 - Use each row's `Open` link to go straight to the pull request without opening the personal detail panel first.
 - Eligible, non-draft rows include a green `Merge` button. It uses the same confirmed native squash-merge flow as the detail panel and submits an empty commit-message body.
 - Each row shows the current unresolved review-conversation count when GitHub's Files view can confirm it.
+- The PR detail panel shows lifecycle timing for draft/ready state, review activity, passing checks, open and resolved discussions, and merge. Exact GitHub event time is labeled separately from refresh-observed time; unavailable history is not guessed.
 - Use `Refresh` to bypass the 10-minute detail cache and refetch current per-PR review/check/merge/thread state.
 - Personal statuses are `unsorted`, `next_up`, `waiting`, `blocked`, and `done`.
 - `Show completed` reveals `done` items without mixing them into the default active views.

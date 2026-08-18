@@ -20,8 +20,9 @@ import {
   sortSummaries
 } from "./models.js";
 import { styles } from "./styles.js";
+import { buildLifecycleSnapshot } from "./pr-lifecycle.js";
 import { createUi } from "./ui.js";
-import { mapLimit, now } from "./utils.js";
+import { extractJiraIssueKeys, mapLimit, now } from "./utils.js";
 
 export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, version = "unknown" }) {
   const state = {
@@ -241,6 +242,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
 
       const snapshot = await storage.load();
       const cachedItems = snapshot.openListCache.items || [];
+      const cachedSummaries = new Map(cachedItems.map((item) => [item.key, item]));
       const detailCache = { ...(snapshot.detailCache || {}) };
       const pendingCacheWrites = new Map();
 
@@ -256,7 +258,12 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
               isCacheHeadMatch(cached, summary) &&
               isCacheChecksCurrent(cached, summary) &&
               now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
-            const fetched = shouldUseCache ? { detail: cached.detail, cacheEntry: null } : await fetchDetail(summary);
+            const fetched = shouldUseCache
+              ? { detail: cached.detail, cacheEntry: null }
+              : await fetchDetail(
+                  summary,
+                  cached?.detail?.lifecycle || cachedSummaries.get(summary.key)?.lifecycle || null
+                );
             if (fetched.cacheEntry) {
               pendingCacheWrites.set(summary.key, fetched.cacheEntry);
             }
@@ -308,7 +315,8 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
     }
   }
 
-  async function fetchDetail(summary) {
+  async function fetchDetail(summary, previousLifecycle = null) {
+    const observedAt = now();
     const html = await fetchHtml(fetchImpl, summary.url);
     const prDocument = parser(html, summary.url);
     let detail = parsePrDetailDocument(prDocument, summary.url);
@@ -359,9 +367,16 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
       }
     }
     const mergedDetail = mergeNativeDetails(detail, { unresolvedThreads });
-    return {
+    const lifecycle = buildLifecycleSnapshot({
+      summary: { ...summary, ...mergedDetail },
       detail: mergedDetail,
-      cacheEntry: buildDetailCacheEntry(summary, mergedDetail, verifiedHeadAwareChecks)
+      prDocument,
+      observedAt,
+      previousLifecycle
+    });
+    return {
+      detail: { ...mergedDetail, lifecycle },
+      cacheEntry: buildDetailCacheEntry(summary, { ...mergedDetail, lifecycle }, verifiedHeadAwareChecks)
     };
   }
 
@@ -643,6 +658,7 @@ export function createTrackerApp({ doc, win, fetchImpl, parser, storage, login, 
     const sortPreferences = normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries);
     ui.render({
       ...state,
+      currentTime: now(),
       sortPreferences,
       summaryGroups: groupSummaries({
         summaries: state.filteredSummaries,
@@ -679,8 +695,18 @@ function mergeSummaryDetail(summary, detail) {
     merge: merged.merge,
     draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
   };
+  if (merged.createdAt) {
+    result.createdAt = merged.createdAt;
+  }
+  const jiraReferences = mergeJiraReferences(summary.title, merged.jiraReferences, merged.jiraBaseUrl);
+  if (jiraReferences.length) {
+    result.jiraReferences = jiraReferences;
+  }
   if (Number.isInteger(merged.unresolvedThreads)) {
     result.unresolvedThreads = merged.unresolvedThreads;
+  }
+  if (detail?.lifecycle && typeof detail.lifecycle === "object") {
+    result.lifecycle = detail.lifecycle;
   }
   return result;
 }
@@ -748,4 +774,27 @@ function mergeDetailCache({ latestDetailCache, snapshotDetailCache, pendingCache
     merged[key] = entry;
   }
   return merged;
+}
+
+function mergeJiraReferences(title, detailReferences, jiraBaseUrl) {
+  const references = [];
+  const seenKeys = new Set();
+  for (const reference of Array.isArray(detailReferences) ? detailReferences : []) {
+    if (!reference?.key || !reference?.url || seenKeys.has(reference.key)) {
+      continue;
+    }
+    seenKeys.add(reference.key);
+    references.push(reference);
+  }
+  if (!jiraBaseUrl) {
+    return references;
+  }
+  for (const key of extractJiraIssueKeys(title)) {
+    if (seenKeys.has(key)) {
+      continue;
+    }
+    seenKeys.add(key);
+    references.push({ key, url: `${jiraBaseUrl}${encodeURIComponent(key)}` });
+  }
+  return references;
 }

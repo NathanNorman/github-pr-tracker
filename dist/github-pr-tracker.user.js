@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
-// @version      1.7.7
+// @version      1.8.0
 // @description  Personal pull request tracker for your own open Toast GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
-// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.7.7
+// @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.8.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
 // @match        https://github.toasttab.com/pulls*
 // @grant        GM_getValue
@@ -82,9 +82,9 @@
   };
 
   // src/utils.js
-  function safeJsonParse(text, fallback = null) {
+  function safeJsonParse(text2, fallback = null) {
     try {
-      return JSON.parse(text);
+      return JSON.parse(text2);
     } catch {
       return fallback;
     }
@@ -121,6 +121,36 @@
     const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
     await Promise.all(workers);
     return results;
+  }
+  function text(value) {
+    return typeof value === "string" ? value : "";
+  }
+  var JIRA_ISSUE_KEY_PATTERN = /\b[A-Z][A-Z0-9]+-\d+\b/g;
+  function extractJiraIssueKeys(value) {
+    const textValue = text(value);
+    const matches = textValue.match(JIRA_ISSUE_KEY_PATTERN) || [];
+    return [...new Set(matches.map((match) => match.toUpperCase()))];
+  }
+  function calendarDaysSince(value, currentTime = Date.now()) {
+    const createdAt = new Date(value);
+    const current = new Date(currentTime);
+    if (Number.isNaN(createdAt.getTime()) || Number.isNaN(current.getTime())) {
+      return null;
+    }
+    const createdDay = new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate());
+    const currentDay = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+    return Math.max(0, Math.round((currentDay.getTime() - createdDay.getTime()) / 864e5));
+  }
+  function normalizeHttpUrl(value, baseUrl = void 0) {
+    if (!value) {
+      return "";
+    }
+    try {
+      const url = baseUrl ? new URL(value, baseUrl) : new URL(value);
+      return /^https?:$/.test(url.protocol) ? url.href : "";
+    } catch {
+      return "";
+    }
   }
   function now() {
     return Date.now();
@@ -184,26 +214,31 @@
     const reviewState = payload.reviewDecision || payload.review_state || payload.currentReviewState;
     const checksState = payload.statusCheckRollup?.state || payload.checks_state || payload.checkState;
     const mergeState = payload.mergeStateStatus || payload.merge_state || payload.mergeState;
+    const createdAt = normalizeTimestamp(payload.createdAt || payload.created_at);
     const draft = typeof payload.isDraft === "boolean" ? payload.isDraft : typeof payload.draft === "boolean" ? payload.draft : payload.state === "DRAFT" ? true : payload.state === "OPEN" ? false : void 0;
-    if (!reviewState && !checksState && !mergeState && typeof draft !== "boolean") {
+    if (!reviewState && !checksState && !mergeState && typeof draft !== "boolean" && !createdAt) {
       return null;
     }
-    return {
+    const detail = {
       review: normalizeReviewState(reviewState || "unknown"),
       checks: normalizeCheckState(checksState || "unknown"),
       merge: normalizeMergeState(mergeState || "unknown"),
       draft: typeof draft === "boolean" ? draft : void 0
     };
+    if (createdAt) {
+      detail.createdAt = createdAt;
+    }
+    return detail;
   }
   function findEmbeddedPayload(doc, baseUrl) {
     const expectedNumber = pullRequestNumber(baseUrl);
     for (const script of doc.querySelectorAll("script")) {
-      const text = script.textContent || "";
+      const text2 = script.textContent || "";
       const isCurrentEmbeddedData = script.matches('script[type="application/json"][data-target*="embeddedData"]');
-      if (!isCurrentEmbeddedData && !text.includes("reviewDecision") && !text.includes("statusCheckRollup") && !text.includes("mergeStateStatus")) {
+      if (!isCurrentEmbeddedData && !text2.includes("reviewDecision") && !text2.includes("statusCheckRollup") && !text2.includes("mergeStateStatus")) {
         continue;
       }
-      const matches = text.match(/\{[\s\S]*\}/g) || [];
+      const matches = text2.match(/\{[\s\S]*\}/g) || [];
       for (const candidate of matches) {
         const parsed = safeJsonParse(candidate);
         const detail = extractNestedPayloadDetail(parsed, expectedNumber);
@@ -214,8 +249,8 @@
     }
     return null;
   }
-  function classifyCheckSignal(text) {
-    const normalized = String(text || "");
+  function classifyCheckSignal(text2) {
+    const normalized = String(text2 || "");
     if (/color-fg-danger|octicon-x|failing|failed|checks? not successful|checks? have failed/i.test(normalized)) {
       return "failing";
     }
@@ -324,7 +359,18 @@
       merge = "clean";
     }
     const draft = /draft/i.test(doc.querySelector('[aria-label="Pull request state"]')?.textContent || "") ? true : void 0;
-    return { review, checks, merge, draft };
+    const createdAt = createdAtFromDom(doc);
+    const jiraReferences = extractJiraReferences(doc);
+    const jiraBaseUrl = jiraBaseUrlFromReferences(jiraReferences);
+    return {
+      review,
+      checks,
+      merge,
+      draft,
+      ...createdAt ? { createdAt } : {},
+      ...jiraReferences.length ? { jiraReferences } : {},
+      ...jiraBaseUrl ? { jiraBaseUrl } : {}
+    };
   }
   function parsePrDetailDocument(doc, baseUrl = doc?.URL) {
     const embedded = findEmbeddedPayload(doc, baseUrl);
@@ -386,8 +432,8 @@
       }
     }
     for (const script of doc.querySelectorAll("script")) {
-      const text = script.textContent || "";
-      const matches = text.match(
+      const text2 = script.textContent || "";
+      const matches = text2.match(
         /https?:\/\/[^"'\\s]+\/[^"'\\s]+\/[^"'\\s]+\/pull\/\d+\/(?:checks|status|merge|review|details|partials\/commit_status_icon)[^"'\\s]*/g
       ) || [];
       for (const match of matches) {
@@ -430,11 +476,122 @@
       merge: left.merge && left.merge !== "unknown" ? left.merge : right.merge || "unknown",
       draft: typeof left.draft === "boolean" ? left.draft : right.draft
     };
+    const createdAt = normalizeTimestamp(left.createdAt || right.createdAt);
+    if (createdAt) {
+      merged.createdAt = createdAt;
+    }
     const unresolvedThreads = Number.isInteger(left.unresolvedThreads) ? left.unresolvedThreads : Number.isInteger(right.unresolvedThreads) ? right.unresolvedThreads : void 0;
     if (Number.isInteger(unresolvedThreads) && unresolvedThreads >= 0) {
       merged.unresolvedThreads = unresolvedThreads;
     }
+    const jiraReferences = normalizeJiraReferences(
+      Array.isArray(left.jiraReferences) && left.jiraReferences.length ? left.jiraReferences : right.jiraReferences
+    );
+    if (jiraReferences.length) {
+      merged.jiraReferences = jiraReferences;
+    }
+    const jiraBaseUrl = normalizeJiraBaseUrl(left.jiraBaseUrl || right.jiraBaseUrl);
+    if (jiraBaseUrl) {
+      merged.jiraBaseUrl = jiraBaseUrl;
+    }
     return merged;
+  }
+  function normalizeTimestamp(value) {
+    const raw = text(value).trim();
+    if (!raw) {
+      return "";
+    }
+    return Number.isNaN(new Date(raw).getTime()) ? "" : raw;
+  }
+  function createdAtFromDom(doc) {
+    const selectors = [
+      ".gh-header-meta relative-time[datetime]",
+      '[data-test-selector="pr-timestamp"] relative-time[datetime]',
+      ".timeline-comment-header relative-time[datetime]",
+      "relative-time[datetime]"
+    ];
+    for (const selector of selectors) {
+      const timestamp = normalizeTimestamp(doc.querySelector(selector)?.getAttribute("datetime"));
+      if (timestamp) {
+        return timestamp;
+      }
+    }
+    return "";
+  }
+  function extractJiraReferences(doc) {
+    const references = [];
+    const seenKeys = /* @__PURE__ */ new Set();
+    for (const anchor of doc.querySelectorAll("a[href]")) {
+      const reference = jiraReferenceFromAnchor(anchor, doc.baseURI);
+      if (!reference || seenKeys.has(reference.key)) {
+        continue;
+      }
+      seenKeys.add(reference.key);
+      references.push(reference);
+    }
+    return references;
+  }
+  function jiraReferenceFromAnchor(anchor, baseUrl = GITHUB_ORIGIN) {
+    const url = normalizeReferenceUrl(anchor.getAttribute("href"), baseUrl);
+    if (!url) {
+      return null;
+    }
+    const browseKey = extractIssueKeysFromBrowseUrl(url)[0] || "";
+    const labelKey = extractJiraIssueKeys(anchor.textContent)[0] || "";
+    if (!browseKey || labelKey && labelKey !== browseKey) {
+      return null;
+    }
+    return { key: browseKey, url };
+  }
+  function extractIssueKeysFromBrowseUrl(url) {
+    const match = String(url).match(/\/browse\/([A-Z][A-Z0-9]+-\d+)(?:[/?#]|$)/gi) || [];
+    return match.map((entry) => entry.match(/([A-Z][A-Z0-9]+-\d+)/i)?.[1]?.toUpperCase() || "").filter(Boolean);
+  }
+  function normalizeReferenceUrl(value, baseUrl = GITHUB_ORIGIN) {
+    return normalizeHttpUrl(value, baseUrl);
+  }
+  function normalizeJiraReferences(references) {
+    const normalized = [];
+    const seenKeys = /* @__PURE__ */ new Set();
+    for (const reference of Array.isArray(references) ? references : []) {
+      const key = extractJiraIssueKeys(reference?.key)[0] || "";
+      const url = normalizeReferenceUrl(reference?.url);
+      if (!key || !url || seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+      normalized.push({ key, url });
+    }
+    return normalized;
+  }
+  function jiraBaseUrlFromReferences(references) {
+    for (const reference of references) {
+      const baseUrl = normalizeJiraBaseUrl(reference?.url, reference?.key);
+      if (baseUrl) {
+        return baseUrl;
+      }
+    }
+    return "";
+  }
+  function normalizeJiraBaseUrl(value, issueKey = "") {
+    const url = normalizeReferenceUrl(value);
+    if (!url) {
+      return "";
+    }
+    if (/\/browse\/?$/i.test(new URL(url).pathname)) {
+      return url.endsWith("/") ? url : `${url}/`;
+    }
+    const key = extractJiraIssueKeys(issueKey)[0] || extractIssueKeysFromBrowseUrl(url)[0] || "";
+    if (!key) {
+      return "";
+    }
+    try {
+      const parsed = new URL(url);
+      const match = parsed.pathname.match(new RegExp(`^(.*\\/browse\\/)${key}$`, "i"));
+      return match ? `${parsed.origin}${match[1]}` : "";
+    } catch {
+      return "";
+    }
   }
   function isResolvedThread(thread) {
     if (thread.matches('.is-resolved, [data-resolved="true" i], [data-is-resolved="true" i]') || thread.querySelector('.is-resolved, [data-resolved="true" i], [data-is-resolved="true" i]')) {
@@ -1169,15 +1326,15 @@
     return scored[0]?.anchor || anchors[0] || null;
   }
   function scoreAnchor(anchor, parsed) {
-    const text = anchor.textContent?.trim() || "";
-    if (!text) {
+    const text2 = anchor.textContent?.trim() || "";
+    if (!text2) {
       return 0;
     }
-    let score = text.length;
-    if (text === `${parsed.owner}/${parsed.repo}` || text === `#${parsed.number}`) {
+    let score = text2.length;
+    if (text2 === `${parsed.owner}/${parsed.repo}` || text2 === `#${parsed.number}`) {
       score -= 100;
     }
-    if (/^\d+$/.test(text) || /^#\d+$/.test(text)) {
+    if (/^\d+$/.test(text2) || /^#\d+$/.test(text2)) {
       score -= 100;
     }
     if (anchor.matches('[data-hovercard-type="pull_request"], [id*="issue_"], [data-test-selector]')) {
@@ -1973,9 +2130,17 @@ select {
 }
 .title,
 .repo,
+.row-header,
 .row-details,
 .blocker-preview {
   display: block;
+}
+.row-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 2px;
 }
 .note-preview,
 .personal-hint {
@@ -2007,9 +2172,12 @@ select {
   text-overflow: ellipsis;
 }
 .repo {
-  margin-bottom: 2px;
   color: var(--fgColor-muted, #59636e);
   font-size: 13px;
+}
+.age-badge {
+  font-size: 11px;
+  font-weight: 600;
 }
 .row-details {
   display: grid;
@@ -2031,6 +2199,19 @@ select {
 }
 .native-status-line {
   display: block;
+}
+.jira-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+.jira-link {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+.jira-link:hover {
+  text-decoration: underline;
 }
 .thread-count::before {
   content: "";
@@ -2213,6 +2394,12 @@ select {
 .drawer-identity .title {
   white-space: normal;
 }
+.identity-jira[hidden] {
+  display: none;
+}
+.identity-jira {
+  margin-top: 8px;
+}
 .pr-actions {
   display: grid;
   gap: 8px;
@@ -2272,6 +2459,42 @@ select {
   color: var(--fgColor-default, #1f2328);
   font-size: 13px;
   font-weight: 600;
+}
+.lifecycle-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 8px;
+}
+.lifecycle-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 12px;
+}
+.lifecycle-row:first-child {
+  border-top: 0;
+}
+.lifecycle-row-label {
+  color: var(--fgColor-muted, #59636e);
+}
+.lifecycle-row-detail {
+  color: var(--fgColor-default, #1f2328);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}
+.lifecycle-row-note,
+.lifecycle-empty {
+  grid-column: 1 / -1;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.lifecycle-empty {
+  padding: 10px;
 }
 .drawer select,
 .drawer input[type="text"] {
@@ -2436,6 +2659,813 @@ select {
   }
 }
 `;
+
+  // src/pr-lifecycle.js
+  var MS_PER_MINUTE = 60 * 1e3;
+  var MS_PER_HOUR = 60 * MS_PER_MINUTE;
+  var MS_PER_DAY = 24 * MS_PER_HOUR;
+  var LIFECYCLE_VERSION = 2;
+  var TIMELINE_EVENT_PATTERNS = Object.freeze([
+    {
+      type: "draft_entered",
+      pattern: /\b(?:converted to draft|converted this pull request to draft|marked this pull request as draft|marked as draft)\b/i
+    },
+    {
+      type: "ready_for_review",
+      pattern: /\bready for review\b/i
+    },
+    {
+      type: "review_requested",
+      pattern: /\brequested review from\b/i
+    },
+    {
+      type: "review_request_removed",
+      pattern: /\bremoved\b.{0,120}\bfrom review\b/i
+    },
+    {
+      type: "changes_requested",
+      pattern: /\b(?:requested changes|changes requested)\b/i
+    },
+    {
+      type: "review_approved",
+      pattern: /\b(?:approved these changes|review approved)\b/i
+    }
+  ]);
+  var LIFECYCLE_PHASE_ORDER = Object.freeze([
+    "open",
+    "draft",
+    "newly_opened",
+    "ready_for_review",
+    "review_requested",
+    "checks_passing",
+    "comments",
+    "changes_requested",
+    "discussions",
+    "comments_and_discussions_resolved",
+    "merged"
+  ]);
+  function buildLifecycleSnapshot({
+    summary = {},
+    detail = {},
+    prDocument,
+    observedAt,
+    previousLifecycle = null
+  }) {
+    const previous = normalizePreviousLifecycle(previousLifecycle);
+    const observedAtIso = normalizeObservationTimestamp(observedAt, previous?.observedAt);
+    const createdAt = normalizeTimestamp2(detail.createdAt || previous?.createdAt);
+    const timelineEvents = parseTimelineEvents(prDocument);
+    const mergedAt = parseMergedAt(prDocument, timelineEvents);
+    const terminalAt = mergedAt || observedAtIso;
+    const isMerged = Boolean(mergedAt);
+    const draftActive = typeof detail.draft === "boolean" ? detail.draft : Boolean(summary.draft);
+    const unresolvedThreads = Number.isInteger(detail.unresolvedThreads) ? detail.unresolvedThreads : null;
+    const checksPassingActive = summary.checks === "passing";
+    const changesRequestedActive = detail.review === "changes_requested";
+    const exactDraftPhase = createdAt ? deriveExactBooleanPhase({
+      key: "draft",
+      createdAt,
+      terminalAt,
+      currentActive: draftActive,
+      events: timelineEvents.filter((event) => event.type === "draft_entered" || event.type === "ready_for_review").map((event) => ({
+        timestamp: event.timestamp,
+        activeAfter: event.type === "draft_entered"
+      })),
+      isTerminal: isMerged
+    }) : unavailableDurationPhase("draft", "Draft timing requires a PR creation timestamp.");
+    const draftPhase = exactDraftPhase.availability === "exact" ? exactDraftPhase : deriveObservedBooleanPhase({
+      key: "draft",
+      currentActive: draftActive,
+      observedAt: observedAtIso,
+      previousPhase: previous?.phases?.draft,
+      previousObservedAt: previous?.observedAt,
+      terminalAt,
+      note: "Draft timing is bounded by refresh observations because GitHub did not expose full draft history."
+    });
+    const openPhase = createdAt && terminalAt ? durationPhaseFromIntervals("open", [{
+      startAt: createdAt,
+      endAt: terminalAt,
+      ongoing: !isMerged
+    }], {
+      availability: "exact",
+      current: !isMerged,
+      note: isMerged ? "Merged PRs close the open interval at merge time." : "Open intervals stop at the stored observation time."
+    }) : unavailableDurationPhase("open", "Open timing requires a PR creation timestamp.");
+    const readyForReviewPhase = createdAt && draftPhase.availability === "exact" ? buildReadyForReviewPhase({
+      createdAt,
+      terminalAt,
+      draftIntervals: draftPhase.intervals,
+      currentDraft: draftActive,
+      isMerged
+    }) : deriveObservedBooleanPhase({
+      key: "ready_for_review",
+      currentActive: !draftActive,
+      observedAt: observedAtIso,
+      previousPhase: previous?.phases?.ready_for_review,
+      previousObservedAt: previous?.observedAt,
+      terminalAt,
+      note: "Ready-for-review time is bounded by refresh observations because exact draft history is unavailable."
+    });
+    const changesRequestedExactPhase = createdAt ? deriveExactBooleanPhase({
+      key: "changes_requested",
+      createdAt,
+      terminalAt,
+      currentActive: changesRequestedActive,
+      events: timelineEvents.filter((event) => event.type === "changes_requested" || event.type === "review_approved").map((event) => ({
+        timestamp: event.timestamp,
+        activeAfter: event.type === "changes_requested"
+      })),
+      isTerminal: isMerged,
+      note: "Derived from explicit review-decision events only."
+    }) : unavailableDurationPhase("changes_requested", "Changes-requested timing requires a PR creation timestamp.");
+    const changesRequestedPhase = changesRequestedExactPhase.availability === "exact" ? changesRequestedExactPhase : deriveObservedBooleanPhase({
+      key: "changes_requested",
+      currentActive: changesRequestedActive,
+      observedAt: observedAtIso,
+      previousPhase: previous?.phases?.changes_requested,
+      previousObservedAt: previous?.observedAt,
+      terminalAt,
+      note: "Changes-requested timing is bounded by refresh observations because GitHub did not expose a complete explicit review history."
+    });
+    const reviewRequestedPhase = deriveReviewRequestedPhase(timelineEvents);
+    const commentsPhase = buildCommentsPhase(prDocument);
+    const discussionsPhase = deriveObservedDiscussionPhase({
+      currentCount: unresolvedThreads,
+      observedAt: observedAtIso,
+      previousPhase: previous?.phases?.discussions,
+      previousObservedAt: previous?.observedAt,
+      terminalAt
+    });
+    const resolvedConversationsPhase = deriveResolvedDiscussionsPhase({
+      currentCount: unresolvedThreads,
+      observedAt: observedAtIso,
+      previousPhase: previous?.phases?.comments_and_discussions_resolved,
+      previousObservedAt: previous?.observedAt,
+      previousDiscussionsPhase: previous?.phases?.discussions,
+      currentDiscussionsPhase: discussionsPhase,
+      terminalAt
+    });
+    const checksPassingPhase = deriveObservedBooleanPhase({
+      key: "checks_passing",
+      currentActive: checksPassingActive,
+      observedAt: observedAtIso,
+      previousPhase: previous?.phases?.checks_passing,
+      previousObservedAt: previous?.observedAt,
+      terminalAt,
+      unavailableWhenUnknown: summary.checks === "unknown",
+      note: "Checks-passing time is bounded by refresh observations."
+    });
+    const newlyOpenedPhase = deriveNewlyOpenedPhase({
+      createdAt,
+      terminalAt,
+      exactDraftPhase: draftPhase,
+      reviewRequestedPhase,
+      changesRequestedExactPhase,
+      commentsPhase,
+      isMerged
+    });
+    return {
+      version: LIFECYCLE_VERSION,
+      observedAt: observedAtIso,
+      createdAt,
+      terminalAt,
+      mergedAt,
+      phases: {
+        open: openPhase,
+        draft: draftPhase,
+        newly_opened: newlyOpenedPhase,
+        ready_for_review: readyForReviewPhase,
+        review_requested: reviewRequestedPhase,
+        checks_passing: checksPassingPhase,
+        comments: commentsPhase,
+        changes_requested: changesRequestedPhase,
+        discussions: discussionsPhase,
+        comments_and_discussions_resolved: resolvedConversationsPhase,
+        merged: terminalPhase("merged", mergedAt)
+      }
+    };
+  }
+  function summarizeLifecyclePhases(lifecycle) {
+    const phases = lifecycle?.phases || {};
+    return LIFECYCLE_PHASE_ORDER.map((key) => summarizeLifecyclePhase(key, phases[key])).filter(Boolean);
+  }
+  function summarizeLifecyclePhase(key, phase) {
+    if (!phase) {
+      return null;
+    }
+    const labels = {
+      open: "Open",
+      draft: "Draft",
+      newly_opened: "Newly opened",
+      ready_for_review: "Ready",
+      review_requested: "Review requested",
+      checks_passing: "Checks",
+      comments: "Comments",
+      changes_requested: "Changes requested",
+      discussions: "Discussions",
+      comments_and_discussions_resolved: "Comments/discussions resolved",
+      merged: "Merged"
+    };
+    const label = labels[key] || key;
+    if (phase.kind === "duration") {
+      if (phase.availability === "unavailable") {
+        return { key, label, detail: "Unavailable", note: phase.note || "" };
+      }
+      const suffix = phase.current ? "active" : "total";
+      return {
+        key,
+        label,
+        detail: `${formatDuration(phase.totalMs)} ${suffix}`,
+        note: phase.note || ""
+      };
+    }
+    if (phase.kind === "event") {
+      if (phase.availability === "unavailable") {
+        return { key, label, detail: "Unavailable", note: phase.note || "" };
+      }
+      if (!phase.count) {
+        return { key, label, detail: "None seen", note: phase.note || "" };
+      }
+      return {
+        key,
+        label,
+        detail: `${phase.count} issue comment${phase.count === 1 ? "" : "s"}`,
+        note: phase.latestAt ? `Latest ${formatTimestamp(phase.latestAt)}` : phase.note || ""
+      };
+    }
+    if (phase.kind === "terminal") {
+      return phase.enteredAt ? { key, label, detail: formatTimestamp(phase.enteredAt), note: phase.note || "" } : { key, label, detail: "Not merged", note: phase.note || "" };
+    }
+    return null;
+  }
+  function deriveExactBooleanPhase({ key, createdAt, terminalAt, currentActive, events, isTerminal = false, note = "" }) {
+    if (!createdAt || !terminalAt) {
+      return unavailableDurationPhase(key, "This phase requires created and observation timestamps.");
+    }
+    const filteredEvents = [...events || []].filter((event) => event.timestamp >= createdAt && event.timestamp <= terminalAt).sort((left, right) => compareTimestamps(left.timestamp, right.timestamp));
+    if (!filteredEvents.length) {
+      return unavailableDurationPhase(
+        key,
+        "Exact timing requires explicit GitHub transition events; the current state alone is not historical evidence."
+      );
+    }
+    const initialActive = inferInitialBooleanState(currentActive, filteredEvents);
+    if (initialActive === null) {
+      return unavailableDurationPhase(
+        key,
+        "GitHub exposed partial transition history, so exact intervals would be fabricated."
+      );
+    }
+    const intervals = [];
+    let active = initialActive;
+    let intervalStart = active ? createdAt : "";
+    for (const event of filteredEvents) {
+      if (active && !event.activeAfter) {
+        intervals.push({
+          startAt: intervalStart,
+          endAt: event.timestamp,
+          ongoing: false
+        });
+        intervalStart = "";
+      } else if (!active && event.activeAfter) {
+        intervalStart = event.timestamp;
+      }
+      active = event.activeAfter;
+    }
+    if (active) {
+      intervals.push({
+        startAt: intervalStart || createdAt,
+        endAt: terminalAt,
+        ongoing: false
+      });
+    }
+    return durationPhaseFromIntervals(key, intervals, {
+      availability: "exact",
+      current: active && !isTerminal,
+      note
+    });
+  }
+  function buildReadyForReviewPhase({ createdAt, terminalAt, draftIntervals, currentDraft, isMerged }) {
+    const intervals = [];
+    let cursor = createdAt;
+    const sortedDraftIntervals = [...draftIntervals || []].sort((left, right) => compareTimestamps(left.startAt, right.startAt));
+    for (const interval of sortedDraftIntervals) {
+      if (interval.startAt > cursor) {
+        intervals.push({
+          startAt: cursor,
+          endAt: interval.startAt,
+          ongoing: false
+        });
+      }
+      cursor = maxTimestamp(cursor, interval.endAt);
+    }
+    if (cursor < terminalAt) {
+      intervals.push({
+        startAt: cursor,
+        endAt: terminalAt,
+        ongoing: false
+      });
+    }
+    const current = !isMerged && !currentDraft && intervals.length > 0 && intervals.at(-1).endAt === terminalAt;
+    return durationPhaseFromIntervals("ready_for_review", intervals, {
+      availability: "exact",
+      current,
+      note: "Ready-for-review is the exact non-draft portion of the PR lifetime."
+    });
+  }
+  function deriveObservedBooleanPhase({
+    key,
+    currentActive,
+    observedAt,
+    previousPhase,
+    previousObservedAt,
+    terminalAt,
+    unavailableWhenUnknown = false,
+    note = ""
+  }) {
+    if (!observedAt || unavailableWhenUnknown) {
+      const prior2 = normalizeDurationPhase(previousPhase, key);
+      if (!prior2) {
+        return unavailableDurationPhase(key, note || "This signal is unavailable for the current snapshot.");
+      }
+      const intervals2 = normalizeIntervals(prior2.intervals);
+      const lastKnownAt = normalizeTimestamp2(previousObservedAt) || intervals2.at(-1)?.endAt || "";
+      if (prior2.current && lastKnownAt) {
+        closeLastInterval(intervals2, lastKnownAt);
+      }
+      return durationPhaseFromIntervals(key, intervals2, {
+        availability: "observed",
+        current: false,
+        note: `${note || "This signal is unavailable for the current snapshot."} Prior observed history was retained; the unknown period is not counted.`
+      });
+    }
+    const prior = normalizeDurationPhase(previousPhase, key);
+    if (prior && previousObservedAt === observedAt) {
+      if (terminalAt && terminalAt !== observedAt) {
+        return closeDurationAtTerminal(prior, terminalAt);
+      }
+      return prior;
+    }
+    const intervals = normalizeIntervals(prior?.intervals || []);
+    const previousCurrent = Boolean(prior?.current);
+    const current = terminalAt === observedAt ? currentActive : false;
+    if (previousCurrent && !currentActive) {
+      closeLastInterval(intervals, terminalAt === observedAt ? observedAt : terminalAt);
+    } else if (!previousCurrent && currentActive) {
+      intervals.push({
+        startAt: observedAt,
+        endAt: terminalAt === observedAt ? observedAt : terminalAt,
+        ongoing: false
+      });
+    } else if (previousCurrent && currentActive) {
+      extendLastInterval(intervals, terminalAt === observedAt ? observedAt : terminalAt, current);
+    } else if (!prior && currentActive) {
+      intervals.push({
+        startAt: observedAt,
+        endAt: terminalAt === observedAt ? observedAt : terminalAt,
+        ongoing: false
+      });
+    }
+    if (current && intervals.length) {
+      intervals[intervals.length - 1].endAt = observedAt;
+      intervals[intervals.length - 1].ongoing = true;
+    }
+    return durationPhaseFromIntervals(key, intervals, {
+      availability: "observed",
+      current,
+      note
+    });
+  }
+  function deriveObservedDiscussionPhase({ currentCount, observedAt, previousPhase, previousObservedAt, terminalAt }) {
+    if (!observedAt || currentCount === null) {
+      return unavailableDurationPhase("discussions", "Discussion timing is unavailable for this snapshot.");
+    }
+    const phase = deriveObservedBooleanPhase({
+      key: "discussions",
+      currentActive: currentCount > 0,
+      observedAt,
+      previousPhase,
+      previousObservedAt,
+      terminalAt,
+      note: "Discussion-open time is bounded by refresh observations."
+    });
+    phase.count = currentCount;
+    return phase;
+  }
+  function deriveResolvedDiscussionsPhase({
+    currentCount,
+    observedAt,
+    previousPhase,
+    previousObservedAt,
+    previousDiscussionsPhase,
+    currentDiscussionsPhase,
+    terminalAt
+  }) {
+    const hasPriorDiscussionHistory = Boolean(previousDiscussionsPhase?.intervals?.length) || Boolean(currentDiscussionsPhase?.intervals?.length) || Boolean(previousDiscussionsPhase?.current);
+    if (!observedAt || currentCount === null || !hasPriorDiscussionHistory) {
+      return unavailableDurationPhase(
+        "comments_and_discussions_resolved",
+        "Discussion-resolution time is unavailable until review-thread activity has been observed."
+      );
+    }
+    return deriveObservedBooleanPhase({
+      key: "comments_and_discussions_resolved",
+      currentActive: currentCount === 0,
+      observedAt,
+      previousPhase,
+      previousObservedAt,
+      terminalAt,
+      note: "Resolved-discussion time is bounded by refresh observations after discussions have been seen."
+    });
+  }
+  function deriveReviewRequestedPhase(events) {
+    const requestEvents = events.filter((event) => event.type === "review_requested");
+    if (!requestEvents.length) {
+      return unavailableDurationPhase(
+        "review_requested",
+        "Review-request timing is only shown when GitHub exposes explicit request events."
+      );
+    }
+    const sortedEvents = events.filter((event) => event.type === "review_requested" || event.type === "review_request_removed").sort((left, right) => compareTimestamps(left.timestamp, right.timestamp));
+    const outstanding = /* @__PURE__ */ new Set();
+    const intervals = [];
+    let intervalStart = "";
+    for (const event of sortedEvents) {
+      const target = parseReviewRequestTarget(event.text);
+      if (!target) {
+        return unavailableDurationPhase(
+          "review_requested",
+          "Review-request events were seen, but GitHub did not expose reviewer identities clearly enough to pair overlaps safely."
+        );
+      }
+      if (event.type === "review_requested") {
+        const wasEmpty = outstanding.size === 0;
+        if (outstanding.has(target)) {
+          return unavailableDurationPhase(
+            "review_requested",
+            "Review-request events overlap ambiguously, so exact outstanding-request time would be fabricated."
+          );
+        }
+        outstanding.add(target);
+        if (wasEmpty) {
+          intervalStart = event.timestamp;
+        }
+        continue;
+      }
+      if (!outstanding.has(target)) {
+        return unavailableDurationPhase(
+          "review_requested",
+          "Review-request removals did not match the outstanding reviewer set, so exact durations are unavailable."
+        );
+      }
+      outstanding.delete(target);
+      if (outstanding.size === 0 && intervalStart) {
+        intervals.push({
+          startAt: intervalStart,
+          endAt: event.timestamp,
+          ongoing: false
+        });
+        intervalStart = "";
+      }
+    }
+    if (outstanding.size > 0) {
+      return unavailableDurationPhase(
+        "review_requested",
+        `${requestEvents.length} explicit request event${requestEvents.length === 1 ? "" : "s"} were seen, but GitHub did not expose enough removal history to close them exactly.`
+      );
+    }
+    return durationPhaseFromIntervals("review_requested", intervals, {
+      availability: "exact",
+      current: false,
+      note: "Only explicit request/remove events count; reviewer presence alone is not treated as historical truth."
+    });
+  }
+  function deriveNewlyOpenedPhase({
+    createdAt,
+    terminalAt,
+    exactDraftPhase,
+    reviewRequestedPhase,
+    changesRequestedExactPhase,
+    commentsPhase,
+    isMerged
+  }) {
+    if (!createdAt || exactDraftPhase.availability !== "exact") {
+      return unavailableDurationPhase(
+        "newly_opened",
+        "Newly-opened timing requires exact draft history and a PR creation timestamp."
+      );
+    }
+    const firstReadyStart = firstNonDraftStart(createdAt, exactDraftPhase.intervals);
+    if (!firstReadyStart) {
+      return unavailableDurationPhase(
+        "newly_opened",
+        "Newly-opened timing is unavailable while the PR has only been observed as draft."
+      );
+    }
+    const firstReviewActivity = [
+      reviewRequestedPhase.availability === "exact" ? reviewRequestedPhase.intervals[0]?.startAt : "",
+      changesRequestedExactPhase.availability === "exact" ? changesRequestedExactPhase.intervals[0]?.startAt : "",
+      commentsPhase.availability !== "unavailable" ? commentsPhase.firstAt : ""
+    ].filter(Boolean).sort(compareTimestamps)[0] || "";
+    if (!firstReviewActivity) {
+      return unavailableDurationPhase(
+        "newly_opened",
+        "Newly-opened timing is unavailable until explicit review activity is visible."
+      );
+    }
+    const endAt = minTimestamp(firstReviewActivity, terminalAt);
+    return durationPhaseFromIntervals("newly_opened", [{
+      startAt: firstReadyStart,
+      endAt,
+      ongoing: false
+    }], {
+      availability: "exact",
+      current: false,
+      note: isMerged ? "Newly-opened is the initial non-draft interval before explicit review activity." : "Newly-opened ends at the first explicit review activity."
+    });
+  }
+  function buildCommentsPhase(doc) {
+    const comments = [];
+    const commentSelectors = [
+      '[data-comment-type="issue"]',
+      '.timeline-comment-group[data-comment-type="issue"]',
+      '.js-comment-container[data-comment-type="issue"]'
+    ];
+    for (const selector of commentSelectors) {
+      for (const node of doc?.querySelectorAll?.(selector) || []) {
+        const timestamp = normalizeTimestamp2(node.querySelector("relative-time[datetime]")?.getAttribute("datetime"));
+        if (timestamp) {
+          comments.push(timestamp);
+        }
+      }
+    }
+    const uniqueComments = [...new Set(comments)].sort(compareTimestamps);
+    return {
+      key: "comments",
+      kind: "event",
+      availability: uniqueComments.length ? "exact" : "unavailable",
+      count: uniqueComments.length,
+      firstAt: uniqueComments[0] || "",
+      latestAt: uniqueComments.at(-1) || "",
+      note: uniqueComments.length ? "Issue comments are counted separately from review decisions and review threads." : "Issue-comment timing is unavailable in the current snapshot markup."
+    };
+  }
+  function terminalPhase(key, enteredAt) {
+    return {
+      key,
+      kind: "terminal",
+      availability: enteredAt ? "exact" : "snapshot_only",
+      enteredAt: enteredAt || "",
+      note: enteredAt ? "Merged is terminal." : "Open PRs have not entered the merged phase."
+    };
+  }
+  function durationPhaseFromIntervals(key, intervals, { availability = "exact", current = false, note = "" } = {}) {
+    const normalizedIntervals = normalizeIntervals(intervals).map((interval, index, source) => ({
+      ...interval,
+      ongoing: Boolean(current && index === source.length - 1)
+    }));
+    return {
+      key,
+      kind: "duration",
+      availability,
+      current,
+      intervals: normalizedIntervals,
+      totalMs: normalizedIntervals.reduce(
+        (total, interval) => total + Math.max(0, Date.parse(interval.endAt) - Date.parse(interval.startAt)),
+        0
+      ),
+      note
+    };
+  }
+  function unavailableDurationPhase(key, note) {
+    return {
+      key,
+      kind: "duration",
+      availability: "unavailable",
+      current: false,
+      intervals: [],
+      totalMs: 0,
+      note
+    };
+  }
+  function parseTimelineEvents(doc) {
+    const events = [];
+    for (const relativeTime of doc?.querySelectorAll?.("relative-time[datetime]") || []) {
+      const timestamp = normalizeTimestamp2(relativeTime.getAttribute("datetime"));
+      if (!timestamp) {
+        continue;
+      }
+      const scope = relativeTime.closest(
+        ".TimelineItem, .js-timeline-item, .timeline-comment-group, .discussion-item, article, li, details, div"
+      ) || relativeTime.parentElement;
+      const text2 = normalizeWhitespace(scope?.textContent || "");
+      for (const { type, pattern } of TIMELINE_EVENT_PATTERNS) {
+        if (pattern.test(text2)) {
+          events.push({ type, timestamp, text: text2 });
+        }
+      }
+    }
+    return dedupeTimelineEvents(events);
+  }
+  function dedupeTimelineEvents(events) {
+    const deduped = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const event of events.sort((left, right) => compareTimestamps(left.timestamp, right.timestamp))) {
+      const key = `${event.type}:${event.timestamp}:${event.text}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deduped.push(event);
+    }
+    return deduped;
+  }
+  function parseMergedAt(doc, events) {
+    for (const node of doc?.querySelectorAll?.("[data-merged='true'], [data-is-merged='true']") || []) {
+      const timestamp = normalizeTimestamp2(node.querySelector("relative-time[datetime]")?.getAttribute("datetime"));
+      if (timestamp) {
+        return timestamp;
+      }
+    }
+    for (const event of events || []) {
+      if (/\bmerged commit\b/i.test(event.text) || /\bmerged this pull request\b/i.test(event.text)) {
+        return event.timestamp;
+      }
+    }
+    for (const node of doc?.querySelectorAll?.(".TimelineItem, .discussion-item, article, li") || []) {
+      const text2 = normalizeWhitespace(node.textContent || "");
+      if (!(/\bmerged commit\b/i.test(text2) || /\bmerged this pull request\b/i.test(text2))) {
+        continue;
+      }
+      const timestamp = normalizeTimestamp2(node.querySelector("relative-time[datetime]")?.getAttribute("datetime"));
+      if (timestamp) {
+        return timestamp;
+      }
+    }
+    return "";
+  }
+  function parseReviewRequestTarget(text2) {
+    const normalized = normalizeWhitespace(text2);
+    const requestMatch = normalized.match(/\brequested review from\s+(.+?)(?:\.|$)/i);
+    if (requestMatch) {
+      return requestMatch[1].trim().toLowerCase();
+    }
+    const removalMatch = normalized.match(/\bremoved\s+(.+?)\s+from review\b/i);
+    if (removalMatch) {
+      return removalMatch[1].trim().toLowerCase();
+    }
+    return "";
+  }
+  function inferInitialBooleanState(currentActive, events) {
+    let state = currentActive;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event.activeAfter === state) {
+        state = !event.activeAfter;
+        continue;
+      }
+      return null;
+    }
+    return state;
+  }
+  function normalizePreviousLifecycle(lifecycle) {
+    if (!lifecycle || typeof lifecycle !== "object") {
+      return null;
+    }
+    return lifecycle;
+  }
+  function normalizeDurationPhase(phase, key) {
+    if (!phase || typeof phase !== "object" || phase.kind !== "duration") {
+      return null;
+    }
+    return {
+      key,
+      kind: "duration",
+      availability: phase.availability,
+      current: Boolean(phase.current),
+      intervals: normalizeIntervals(phase.intervals || []),
+      totalMs: Number.isFinite(phase.totalMs) ? phase.totalMs : 0,
+      note: typeof phase.note === "string" ? phase.note : ""
+    };
+  }
+  function normalizeIntervals(intervals) {
+    return (Array.isArray(intervals) ? intervals : []).filter((interval) => interval?.startAt && interval?.endAt).map((interval) => ({
+      startAt: normalizeTimestamp2(interval.startAt),
+      endAt: normalizeTimestamp2(interval.endAt),
+      ongoing: Boolean(interval.ongoing)
+    })).filter((interval) => interval.startAt && interval.endAt && interval.endAt >= interval.startAt).sort((left, right) => compareTimestamps(left.startAt, right.startAt));
+  }
+  function closeDurationAtTerminal(phase, terminalAt) {
+    if (!terminalAt || !phase.current || !phase.intervals.length) {
+      return phase;
+    }
+    const intervals = normalizeIntervals(phase.intervals);
+    const last = intervals.at(-1);
+    if (last) {
+      last.endAt = terminalAt;
+      last.ongoing = false;
+    }
+    return durationPhaseFromIntervals(phase.key, intervals, {
+      availability: phase.availability,
+      current: false,
+      note: phase.note
+    });
+  }
+  function closeLastInterval(intervals, endAt) {
+    const last = intervals.at(-1);
+    if (!last) {
+      return;
+    }
+    last.endAt = endAt;
+    last.ongoing = false;
+  }
+  function extendLastInterval(intervals, endAt, ongoing) {
+    const last = intervals.at(-1);
+    if (!last) {
+      return;
+    }
+    if (Date.parse(endAt) >= Date.parse(last.endAt)) {
+      last.endAt = endAt;
+    }
+    last.ongoing = ongoing;
+  }
+  function firstNonDraftStart(createdAt, draftIntervals) {
+    const firstDraft = normalizeIntervals(draftIntervals || [])[0];
+    if (!firstDraft) {
+      return createdAt;
+    }
+    if (firstDraft.startAt > createdAt) {
+      return createdAt;
+    }
+    return firstDraft.endAt || "";
+  }
+  function normalizeObservationTimestamp(value, fallback) {
+    const normalized = normalizeTimestamp2(value);
+    if (normalized) {
+      return normalized;
+    }
+    return normalizeTimestamp2(fallback);
+  }
+  function normalizeTimestamp2(value) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? new Date(value).toISOString() : "";
+    }
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return "";
+    }
+    const timestamp = Date.parse(raw);
+    return Number.isNaN(timestamp) ? "" : new Date(timestamp).toISOString();
+  }
+  function normalizeWhitespace(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+  function compareTimestamps(left, right) {
+    return Date.parse(left) - Date.parse(right);
+  }
+  function minTimestamp(left, right) {
+    if (!left) {
+      return right;
+    }
+    if (!right) {
+      return left;
+    }
+    return compareTimestamps(left, right) <= 0 ? left : right;
+  }
+  function maxTimestamp(left, right) {
+    if (!left) {
+      return right;
+    }
+    if (!right) {
+      return left;
+    }
+    return compareTimestamps(left, right) >= 0 ? left : right;
+  }
+  function formatTimestamp(value) {
+    const timestamp = Date.parse(value);
+    if (Number.isNaN(timestamp)) {
+      return value || "Unknown";
+    }
+    return new Intl.DateTimeFormat(void 0, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    }).format(timestamp);
+  }
+  function formatDuration(value) {
+    const totalMs = Number.isFinite(value) ? Math.max(0, value) : 0;
+    const days = Math.floor(totalMs / MS_PER_DAY);
+    const hours = Math.floor(totalMs % MS_PER_DAY / MS_PER_HOUR);
+    const minutes = Math.floor(totalMs % MS_PER_HOUR / MS_PER_MINUTE);
+    if (days > 0) {
+      return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+    }
+    if (hours > 0) {
+      return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+    }
+    return `${minutes}m`;
+  }
 
   // src/ui.js
   var STATUS_LABELS = {
@@ -2827,9 +3857,16 @@ select {
           rowIcon.setAttribute("aria-hidden", "true");
           const rowCopy = doc.createElement("span");
           rowCopy.className = "row-copy";
+          const headerLine = doc.createElement("span");
+          headerLine.className = "row-header";
           const repo = doc.createElement("span");
           repo.className = "repo";
           repo.textContent = `${summary.owner}/${summary.repo} #${summary.number}`;
+          headerLine.append(repo);
+          const ageBadge = makeAgeBadge(summary.createdAt, state.currentTime);
+          if (ageBadge) {
+            headerLine.append(ageBadge);
+          }
           const title = doc.createElement("span");
           title.className = "title";
           title.textContent = summary.title;
@@ -2860,6 +3897,10 @@ select {
           if (metadata.childElementCount) {
             details.append(metadata);
           }
+          const jiraLinks = renderJiraLinks(summary.jiraReferences);
+          if (jiraLinks) {
+            details.append(jiraLinks);
+          }
           const statusLines = doc.createElement("span");
           statusLines.className = "row-status-lines";
           appendNativeStatus(statusLines, "review", summary.review, REVIEW_ROW_LABELS);
@@ -2871,9 +3912,9 @@ select {
             const blocker = doc.createElement("span");
             blocker.className = "blocker-preview";
             blocker.textContent = `Blocked by ${record.blockedBy}`;
-            rowCopy.append(repo, title, details, blocker);
+            rowCopy.append(headerLine, title, details, blocker);
           } else {
-            rowCopy.append(repo, title, details);
+            rowCopy.append(headerLine, title, details);
           }
           if (record.notes) {
             const notePreview = doc.createElement("span");
@@ -2972,6 +4013,8 @@ select {
       drawerView.identityTitle.textContent = summary?.title || state.selectedKey;
       drawerView.identityRepo.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
       drawerView.link.href = summary?.url || "#";
+      syncDrawerJiraLinks(drawerView, summary?.jiraReferences);
+      renderLifecycle(drawerView, summary?.lifecycle);
       drawerView.mergeButton.textContent = selectedActionPending && state.prAction.type === "merge" ? "Merging\u2026" : "Squash & merge";
       drawerView.mergeButton.disabled = actionPending;
       if (canMerge) {
@@ -3038,7 +4081,17 @@ select {
       identityTitle.className = "title";
       const identityRepo = doc.createElement("div");
       identityRepo.className = "repo";
-      identity.append(identityTitle, identityRepo);
+      const identityJira = doc.createElement("div");
+      identityJira.className = "identity-jira";
+      identity.append(identityTitle, identityRepo, identityJira);
+      const lifecycle = doc.createElement("section");
+      lifecycle.className = "field lifecycle";
+      const lifecycleLabel = doc.createElement("div");
+      lifecycleLabel.className = "field-label";
+      lifecycleLabel.textContent = "Lifecycle";
+      const lifecycleList = doc.createElement("div");
+      lifecycleList.className = "lifecycle-list";
+      lifecycle.append(lifecycleLabel, lifecycleList);
       const prActions = doc.createElement("section");
       prActions.className = "pr-actions";
       const prActionsLabel = doc.createElement("div");
@@ -3172,9 +4225,11 @@ select {
       Object.assign(view, {
         key: selectedKey,
         closeComment: "",
-        nodes: [header, identity, prActions, statusField, blockerField, tagsField, notesField, footer],
+        nodes: [header, identity, lifecycle, prActions, statusField, blockerField, tagsField, notesField, footer],
         identityTitle,
         identityRepo,
+        identityJira,
+        lifecycleList,
         prActions,
         prActionButtons,
         mergeButton,
@@ -3406,6 +4461,16 @@ select {
       badge.textContent = `${label}: ${String(value).replaceAll("_", " ")}`;
       return badge;
     }
+    function makeAgeBadge(createdAt, currentTime) {
+      const days = calendarDaysSince(createdAt, currentTime);
+      if (!Number.isInteger(days)) {
+        return null;
+      }
+      const badge = makeBadge("Age", `${days}d`, "age");
+      badge.classList.add("age-badge");
+      badge.setAttribute("aria-label", `${days} ${days === 1 ? "day" : "days"} old`);
+      return badge;
+    }
     function appendKnownBadge(target, label, value, kind = label.toLowerCase()) {
       if (value && value !== "unknown") {
         target.append(makeBadge(label, value, kind));
@@ -3431,6 +4496,39 @@ select {
       pill.style.borderColor = tokens.border;
       pill.addEventListener("click", onClick);
       return pill;
+    }
+    function renderJiraLinks(references) {
+      const validReferences = Array.isArray(references) ? references.map((reference) => {
+        const key = typeof reference?.key === "string" ? reference.key : "";
+        const url = normalizeHttpUrl(reference?.url);
+        return key && url ? { key, url } : null;
+      }).filter(Boolean) : [];
+      if (!validReferences.length) {
+        return null;
+      }
+      const links = doc.createElement("span");
+      links.className = "jira-links";
+      for (const reference of validReferences) {
+        const link = doc.createElement("a");
+        link.className = "jira-link";
+        link.href = reference.url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = reference.key;
+        link.setAttribute("aria-label", `Open Jira issue ${reference.key}`);
+        links.append(link);
+      }
+      return links;
+    }
+    function syncDrawerJiraLinks(view, references) {
+      view.identityJira.textContent = "";
+      const links = renderJiraLinks(references);
+      if (links) {
+        view.identityJira.append(links);
+        view.identityJira.hidden = false;
+        return;
+      }
+      view.identityJira.hidden = true;
     }
     function makeActionButton(label, onClick, className) {
       const button = doc.createElement("button");
@@ -3587,8 +4685,37 @@ select {
     return "just now";
   }
   function compactNote(value) {
-    const text = String(value).replace(/\s+/g, " ").trim();
-    return text.length > 110 ? `Note \xB7 ${text.slice(0, 107)}\u2026` : `Note \xB7 ${text}`;
+    const text2 = String(value).replace(/\s+/g, " ").trim();
+    return text2.length > 110 ? `Note \xB7 ${text2.slice(0, 107)}\u2026` : `Note \xB7 ${text2}`;
+  }
+  function renderLifecycle(view, lifecycle) {
+    view.lifecycleList.textContent = "";
+    const rows = summarizeLifecyclePhases(lifecycle);
+    if (!rows.length) {
+      const empty = view.lifecycleList.ownerDocument.createElement("div");
+      empty.className = "lifecycle-empty";
+      empty.textContent = "No lifecycle timing captured yet.";
+      view.lifecycleList.append(empty);
+      return;
+    }
+    for (const row of rows) {
+      const item = view.lifecycleList.ownerDocument.createElement("div");
+      item.className = "lifecycle-row";
+      const label = view.lifecycleList.ownerDocument.createElement("span");
+      label.className = "lifecycle-row-label";
+      label.textContent = row.label;
+      const detail = view.lifecycleList.ownerDocument.createElement("span");
+      detail.className = "lifecycle-row-detail";
+      detail.textContent = row.detail;
+      item.append(label, detail);
+      if (row.note) {
+        const note = view.lifecycleList.ownerDocument.createElement("span");
+        note.className = "lifecycle-row-note";
+        note.textContent = row.note;
+        item.append(note);
+      }
+      view.lifecycleList.append(item);
+    }
   }
   function summarizeSort(sortPreferences, groupOptions, sortOptions) {
     const groupLabels = new Map(groupOptions.map((option) => [option.value, option.label]));
@@ -3793,6 +4920,7 @@ select {
         render();
         const snapshot = await storage.load();
         const cachedItems = snapshot.openListCache.items || [];
+        const cachedSummaries = new Map(cachedItems.map((item) => [item.key, item]));
         const detailCache = { ...snapshot.detailCache || {} };
         const pendingCacheWrites = /* @__PURE__ */ new Map();
         try {
@@ -3801,7 +4929,10 @@ select {
             try {
               const cached = detailCache[summary.key];
               const shouldUseCache = !force && cached && cached.parserVersion === DETAIL_PARSER_VERSION && isCacheHeadMatch(cached, summary) && isCacheChecksCurrent(cached, summary) && now() - cached.updatedAt < DETAIL_CACHE_TTL_MS;
-              const fetched = shouldUseCache ? { detail: cached.detail, cacheEntry: null } : await fetchDetail(summary);
+              const fetched = shouldUseCache ? { detail: cached.detail, cacheEntry: null } : await fetchDetail(
+                summary,
+                cached?.detail?.lifecycle || cachedSummaries.get(summary.key)?.lifecycle || null
+              );
               if (fetched.cacheEntry) {
                 pendingCacheWrites.set(summary.key, fetched.cacheEntry);
               }
@@ -3850,7 +4981,8 @@ select {
         }
       }
     }
-    async function fetchDetail(summary) {
+    async function fetchDetail(summary, previousLifecycle = null) {
+      const observedAt = now();
       const html = await fetchHtml(fetchImpl, summary.url);
       const prDocument = parser(html, summary.url);
       let detail = parsePrDetailDocument(prDocument, summary.url);
@@ -3888,9 +5020,16 @@ select {
         }
       }
       const mergedDetail = mergeNativeDetails(detail, { unresolvedThreads });
-      return {
+      const lifecycle = buildLifecycleSnapshot({
+        summary: { ...summary, ...mergedDetail },
         detail: mergedDetail,
-        cacheEntry: buildDetailCacheEntry(summary, mergedDetail, verifiedHeadAwareChecks)
+        prDocument,
+        observedAt,
+        previousLifecycle
+      });
+      return {
+        detail: { ...mergedDetail, lifecycle },
+        cacheEntry: buildDetailCacheEntry(summary, { ...mergedDetail, lifecycle }, verifiedHeadAwareChecks)
       };
     }
     async function fetchDeferredDetail(deferredUrl, { preferHtml = false } = {}) {
@@ -4167,6 +5306,7 @@ GitHub's default commit title will be kept and the commit message body will be e
       const sortPreferences = normalizeSortPreferencesForSummaries(state.sortPreferences, state.allSummaries);
       ui.render({
         ...state,
+        currentTime: now(),
         sortPreferences,
         summaryGroups: groupSummaries({
           summaries: state.filteredSummaries,
@@ -4201,8 +5341,18 @@ GitHub's default commit title will be kept and the commit message body will be e
       merge: merged.merge,
       draft: typeof merged.draft === "boolean" ? merged.draft : summary.draft
     };
+    if (merged.createdAt) {
+      result.createdAt = merged.createdAt;
+    }
+    const jiraReferences = mergeJiraReferences(summary.title, merged.jiraReferences, merged.jiraBaseUrl);
+    if (jiraReferences.length) {
+      result.jiraReferences = jiraReferences;
+    }
     if (Number.isInteger(merged.unresolvedThreads)) {
       result.unresolvedThreads = merged.unresolvedThreads;
+    }
+    if (detail?.lifecycle && typeof detail.lifecycle === "object") {
+      result.lifecycle = detail.lifecycle;
     }
     return result;
   }
@@ -4260,6 +5410,28 @@ GitHub's default commit title will be kept and the commit message body will be e
       merged[key] = entry;
     }
     return merged;
+  }
+  function mergeJiraReferences(title, detailReferences, jiraBaseUrl) {
+    const references = [];
+    const seenKeys = /* @__PURE__ */ new Set();
+    for (const reference of Array.isArray(detailReferences) ? detailReferences : []) {
+      if (!reference?.key || !reference?.url || seenKeys.has(reference.key)) {
+        continue;
+      }
+      seenKeys.add(reference.key);
+      references.push(reference);
+    }
+    if (!jiraBaseUrl) {
+      return references;
+    }
+    for (const key of extractJiraIssueKeys(title)) {
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+      references.push({ key, url: `${jiraBaseUrl}${encodeURIComponent(key)}` });
+    }
+    return references;
   }
 
   // src/storage.js

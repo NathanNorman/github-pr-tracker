@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createTrackerApp } from "../src/app.js";
 import { DETAIL_PARSER_VERSION } from "../src/constants.js";
+import { buildLifecycleSnapshot } from "../src/pr-lifecycle.js";
 import { makeDom, parseHtml } from "./helpers.js";
 
 function makeStorage(seed) {
@@ -164,6 +165,115 @@ test("search and notes keep focus and value across updates", async () => {
     assert.equal(shadow.activeElement, notes);
     assert.equal(notes.value, value);
   }
+});
+
+test("list rows render an age badge and Jira references as links", async () => {
+  const dom = makeDom();
+  const createdAt = new Date();
+  createdAt.setHours(12, 0, 0, 0);
+  createdAt.setDate(createdAt.getDate() - 3);
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{
+        key: "acme/api#1",
+        owner: "acme",
+        repo: "api",
+        number: 1,
+        title: "ENG-42 Fix CI",
+        url: "https://github.toasttab.com/acme/api/pull/1",
+        draft: false,
+        createdAt: createdAt.toISOString(),
+        jiraReferences: [
+          { key: "ENG-42", url: "https://toasttab.atlassian.net/browse/ENG-42" }
+        ]
+      }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([{ href: "/acme/api/pull/1", title: "ENG-42 Fix CI", draft: false }])
+          : `
+            <div class="gh-header-meta">
+              <relative-time datetime="${createdAt.toISOString()}"></relative-time>
+            </div>
+            <a href="https://toasttab.atlassian.net/browse/ENG-42">ENG-42</a>
+          `,
+      headers: { get: () => "text/html" }
+    })
+  });
+
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  const ageBadge = shadow.querySelector(".pr-row .age-badge");
+  assert.equal(ageBadge?.textContent, "Age: 3d");
+  assert.equal(ageBadge?.getAttribute("aria-label"), "3 days old");
+
+  const rowJiraLink = shadow.querySelector(".pr-row .jira-link");
+  assert.equal(rowJiraLink?.textContent, "ENG-42");
+  assert.equal(rowJiraLink?.getAttribute("href"), "https://toasttab.atlassian.net/browse/ENG-42");
+  assert.equal(rowJiraLink?.getAttribute("target"), "_blank");
+  assert.equal(rowJiraLink?.getAttribute("rel"), "noreferrer");
+
+  shadow.querySelector(".pr-row-select").click();
+  const drawerJiraLink = shadow.querySelector(".drawer-identity .jira-link");
+  assert.equal(drawerJiraLink?.textContent, "ENG-42");
+  assert.equal(drawerJiraLink?.getAttribute("href"), "https://toasttab.atlassian.net/browse/ENG-42");
+});
+
+test("unsafe imported jira urls do not render as links", async () => {
+  const dom = makeDom();
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{
+        key: "acme/api#1",
+        owner: "acme",
+        repo: "api",
+        number: 1,
+        title: "SEC-1 Harden parser",
+        url: "https://github.toasttab.com/acme/api/pull/1",
+        draft: false,
+        jiraReferences: [
+          { key: "SEC-1", url: "javascript:alert('xss')" }
+        ]
+      }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async (url) => ({
+      ok: true,
+      text: async () =>
+        String(url).includes("/pulls")
+          ? pullsHtml([{ href: "/acme/api/pull/1", title: "SEC-1 Harden parser", draft: false }])
+          : "<html><body></body></html>",
+      headers: { get: () => "text/html" }
+    })
+  });
+
+  await app.init();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  assert.equal(shadow.querySelector(".pr-row .jira-link"), null);
+
+  shadow.querySelector(".pr-row-select").click();
+  assert.equal(shadow.querySelector(".drawer-identity .jira-link"), null);
 });
 
 test("drawer editors contain keyboard events so GitHub search cannot steal focus", async () => {
@@ -682,7 +792,7 @@ test("detail refresh invalidates older parser results, merges deferred fields, a
       if (value.endsWith("/pull/1")) {
         return {
           ok: true,
-          text: async () => '<html><body><section data-test-selector="required-review-banner">Approved</section><div data-status-details-url="/acme/api/pull/1/status"></div></body></html>'
+          text: async () => '<html><body><section data-test-selector="required-review-banner">Approved</section><div class="gh-header-meta"><relative-time datetime="2026-08-01T10:00:00.000Z"></relative-time></div><div data-status-details-url="/acme/api/pull/1/status"></div></body></html>'
         };
       }
       if (value.endsWith("/pull/1/files")) {
@@ -711,6 +821,303 @@ test("detail refresh invalidates older parser results, merges deferred fields, a
   assert.equal(summary.draft, true);
   assert.equal(summary.unresolvedThreads, 2);
   assert.equal(storage.getEnvelope().detailCache["acme/api#1"].parserVersion, DETAIL_PARSER_VERSION);
+  assert.equal(summary.lifecycle.observedAt.length > 0, true);
+  assert.equal(summary.lifecycle.phases.open.availability, "exact");
+});
+
+test("drawer renders lifecycle timing from the stored observation snapshot", async () => {
+  const dom = makeDom("https://github.toasttab.com/pulls");
+  const storage = makeStorage({
+    accountLogin: "octocat",
+    records: {
+      "acme/api#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+    },
+    openListCache: {
+      updatedAt: 1,
+      items: [{
+        key: "acme/api#1",
+        owner: "acme",
+        repo: "api",
+        number: 1,
+        title: "Lifecycle timing",
+        url: "https://github.toasttab.com/acme/api/pull/1",
+        draft: false,
+        lifecycle: {
+          observedAt: "2026-08-03T16:00:00.000Z",
+          phases: {
+            open: {
+              key: "open",
+              kind: "duration",
+              availability: "exact",
+              current: true,
+              intervals: [{ startAt: "2026-08-01T10:00:00.000Z", endAt: "2026-08-03T16:00:00.000Z", ongoing: true }],
+              totalMs: 194400000,
+              note: "Open intervals stop at the stored observation time."
+            },
+            draft: {
+              key: "draft",
+              kind: "duration",
+              availability: "exact",
+              current: false,
+              intervals: [{ startAt: "2026-08-01T10:00:00.000Z", endAt: "2026-08-01T12:00:00.000Z", ongoing: false }],
+              totalMs: 7200000,
+              note: ""
+            },
+            ready_for_review: {
+              key: "ready_for_review",
+              kind: "duration",
+              availability: "exact",
+              current: true,
+              intervals: [{ startAt: "2026-08-01T12:00:00.000Z", endAt: "2026-08-03T16:00:00.000Z", ongoing: true }],
+              totalMs: 187200000,
+              note: ""
+            },
+            changes_requested: {
+              key: "changes_requested",
+              kind: "duration",
+              availability: "unavailable",
+              current: false,
+              intervals: [],
+              totalMs: 0,
+              note: "GitHub exposed partial transition history."
+            },
+            review_requested: {
+              key: "review_requested",
+              kind: "duration",
+              availability: "unavailable",
+              current: false,
+              intervals: [],
+              totalMs: 0,
+              note: "Review-request timing is only shown when GitHub exposes explicit request events."
+            },
+            checks_passing: {
+              key: "checks_passing",
+              kind: "duration",
+              availability: "observed",
+              current: true,
+              intervals: [{ startAt: "2026-08-03T16:00:00.000Z", endAt: "2026-08-03T16:00:00.000Z", ongoing: true }],
+              totalMs: 0,
+              note: "Checks-passing time is bounded by refresh observations."
+            },
+            comments: {
+              key: "comments",
+              kind: "event",
+              availability: "unavailable",
+              count: 0,
+              latestAt: "",
+              note: "Issue-comment timing is unavailable in the current snapshot markup."
+            },
+            discussions: {
+              key: "discussions",
+              kind: "duration",
+              availability: "observed",
+              current: true,
+              intervals: [{ startAt: "2026-08-03T16:00:00.000Z", endAt: "2026-08-03T16:00:00.000Z", ongoing: true }],
+              totalMs: 0,
+              count: 2,
+              note: "Discussion-open time is bounded by refresh observations."
+            },
+            comments_and_discussions_resolved: {
+              key: "comments_and_discussions_resolved",
+              kind: "duration",
+              availability: "unavailable",
+              current: false,
+              intervals: [],
+              totalMs: 0,
+              note: "Discussion-resolution time is unavailable until review-thread activity has been observed."
+            },
+            merged: {
+              key: "merged",
+              kind: "terminal",
+              availability: "snapshot_only",
+              enteredAt: "",
+              note: "Open PRs have not entered the merged phase."
+            }
+          }
+        }
+      }]
+    },
+    detailCache: {}
+  });
+  const app = buildApp({
+    dom,
+    storage,
+    fetchImpl: async () => ({ ok: true, text: async () => "<html><body></body></html>" })
+  });
+
+  await app.init();
+  app.mount();
+  const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
+  shadow.querySelector(".pr-row-select").click();
+  assert.match(shadow.textContent, /Lifecycle/);
+  assert.match(shadow.textContent, /Open/);
+  assert.match(shadow.textContent, /2d 6h active/);
+  assert.match(shadow.textContent, /Checks/);
+  assert.match(shadow.textContent, /0m active/);
+  assert.match(shadow.textContent, /Discussions/);
+  assert.match(shadow.textContent, /Unavailable/);
+});
+
+test("lifecycle persists across cache reloads and replayed refreshes do not duplicate passing intervals", async () => {
+  const realDateNow = Date.now;
+  try {
+    const storage = makeStorage({
+      accountLogin: "octocat",
+      records: {},
+      openListCache: { updatedAt: 1, items: [] },
+      detailCache: {}
+    });
+    let currentChecks = "SUCCESS";
+    let currentNow = Date.parse("2026-08-01T11:00:00.000Z");
+    Date.now = () => currentNow;
+
+    const fetchImpl = async (url) => {
+      const value = String(url);
+      if (value.includes("/pulls")) {
+        return {
+          ok: true,
+          text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }])
+        };
+      }
+      if (value.endsWith("/pull/1")) {
+        return {
+          ok: true,
+          text: async () => `
+            <html><body>
+              <div class="gh-header-meta">
+                <relative-time datetime="2026-08-01T10:00:00.000Z"></relative-time>
+              </div>
+              <div data-status-details-url="/acme/api/pull/1/status"></div>
+            </body></html>`
+        };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      return {
+        ok: true,
+        json: async () => ({ checks_state: currentChecks }),
+        headers: { get: () => "application/json" }
+      };
+    };
+
+    const app1 = buildApp({ dom: makeDom(), storage, fetchImpl });
+    await app1.init();
+    let summary = app1.getState().allSummaries[0];
+    assert.deepEqual(summary.lifecycle.phases.checks_passing.intervals, [
+      {
+        startAt: "2026-08-01T11:00:00.000Z",
+        endAt: "2026-08-01T11:00:00.000Z",
+        ongoing: true
+      }
+    ]);
+
+    await app1.refresh(true);
+    summary = app1.getState().allSummaries[0];
+    assert.equal(summary.lifecycle.phases.checks_passing.intervals.length, 1);
+
+    currentChecks = "FAILURE";
+    currentNow = Date.parse("2026-08-01T12:00:00.000Z");
+    await app1.refresh(true);
+    summary = app1.getState().allSummaries[0];
+    assert.deepEqual(summary.lifecycle.phases.checks_passing.intervals, [
+      {
+        startAt: "2026-08-01T11:00:00.000Z",
+        endAt: "2026-08-01T12:00:00.000Z",
+        ongoing: false
+      }
+    ]);
+
+    currentChecks = "SUCCESS";
+    currentNow = Date.parse("2026-08-01T13:00:00.000Z");
+    const app2 = buildApp({ dom: makeDom(), storage, fetchImpl });
+    await app2.init();
+    summary = app2.getState().allSummaries[0];
+    assert.deepEqual(summary.lifecycle.phases.checks_passing.intervals, [
+      {
+        startAt: "2026-08-01T11:00:00.000Z",
+        endAt: "2026-08-01T12:00:00.000Z",
+        ongoing: false
+      },
+      {
+        startAt: "2026-08-01T13:00:00.000Z",
+        endAt: "2026-08-01T13:00:00.000Z",
+        ongoing: true
+      }
+    ]);
+
+    await app2.refresh(true);
+    summary = app2.getState().allSummaries[0];
+    assert.equal(summary.lifecycle.phases.checks_passing.intervals.length, 2);
+  } finally {
+    Date.now = realDateNow;
+  }
+});
+
+test("lifecycle history falls back to the persisted open-list summary when detail cache is absent", async () => {
+  const realDateNow = Date.now;
+  try {
+    const previousLifecycle = buildLifecycleSnapshot({
+      summary: { checks: "passing", draft: false },
+      detail: { createdAt: "2026-08-01T10:00:00.000Z", draft: false, review: "approved" },
+      observedAt: "2026-08-01T11:00:00.000Z",
+      prDocument: parseHtml("<main></main>")
+    });
+    const storage = makeStorage({
+      accountLogin: "octocat",
+      records: {},
+      openListCache: {
+        updatedAt: 1,
+        items: [{
+          key: "acme/api#1",
+          owner: "acme",
+          repo: "api",
+          number: 1,
+          title: "One",
+          url: "https://github.toasttab.com/acme/api/pull/1",
+          draft: false,
+          lifecycle: previousLifecycle
+        }]
+      },
+      detailCache: {}
+    });
+    Date.now = () => Date.parse("2026-08-01T12:00:00.000Z");
+    const fetchImpl = async (url) => {
+      const value = String(url);
+      if (value.includes("/pulls")) {
+        return { ok: true, text: async () => pullsHtml([{ href: "/acme/api/pull/1", title: "One", draft: false }]) };
+      }
+      if (value.endsWith("/pull/1")) {
+        return {
+          ok: true,
+          text: async () => `
+            <div class="gh-header-meta">
+              <relative-time datetime="2026-08-01T10:00:00.000Z"></relative-time>
+            </div>
+            <div data-status-details-url="/acme/api/pull/1/status"></div>`
+        };
+      }
+      if (value.endsWith("/pull/1/files")) {
+        return { ok: true, text: async () => '<div class="js-diff-progressive-container"></div>' };
+      }
+      return {
+        ok: true,
+        json: async () => ({ checks_state: "FAILURE" }),
+        headers: { get: () => "application/json" }
+      };
+    };
+
+    const app = buildApp({ dom: makeDom(), storage, fetchImpl });
+    await app.init();
+    const checksPassing = app.getState().allSummaries[0].lifecycle.phases.checks_passing;
+    assert.deepEqual(checksPassing.intervals, [{
+      startAt: "2026-08-01T11:00:00.000Z",
+      endAt: "2026-08-01T12:00:00.000Z",
+      ongoing: false
+    }]);
+  } finally {
+    Date.now = realDateNow;
+  }
 });
 
 test("detail refresh keeps a green authored-list current-head status authoritative over stale main-page failures", async () => {

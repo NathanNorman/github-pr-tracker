@@ -460,9 +460,17 @@ select {
 }
 .title,
 .repo,
+.row-header,
 .row-details,
 .blocker-preview {
   display: block;
+}
+.row-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 2px;
 }
 .note-preview,
 .personal-hint {
@@ -494,9 +502,12 @@ select {
   text-overflow: ellipsis;
 }
 .repo {
-  margin-bottom: 2px;
   color: var(--fgColor-muted, #59636e);
   font-size: 13px;
+}
+.age-badge {
+  font-size: 11px;
+  font-weight: 600;
 }
 .row-details {
   display: grid;
@@ -518,6 +529,19 @@ select {
 }
 .native-status-line {
   display: block;
+}
+.jira-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+.jira-link {
+  color: var(--fgColor-accent, #0969da);
+  text-decoration: none;
+}
+.jira-link:hover {
+  text-decoration: underline;
 }
 .thread-count::before {
   content: "";
@@ -700,6 +724,12 @@ select {
 .drawer-identity .title {
   white-space: normal;
 }
+.identity-jira[hidden] {
+  display: none;
+}
+.identity-jira {
+  margin-top: 8px;
+}
 .pr-actions {
   display: grid;
   gap: 8px;
@@ -759,6 +789,42 @@ select {
   color: var(--fgColor-default, #1f2328);
   font-size: 13px;
   font-weight: 600;
+}
+.lifecycle-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--borderColor-muted, #d8dee4);
+  border-radius: 8px;
+}
+.lifecycle-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+  font-size: 12px;
+}
+.lifecycle-row:first-child {
+  border-top: 0;
+}
+.lifecycle-row-label {
+  color: var(--fgColor-muted, #59636e);
+}
+.lifecycle-row-detail {
+  color: var(--fgColor-default, #1f2328);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}
+.lifecycle-row-note,
+.lifecycle-empty {
+  grid-column: 1 / -1;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.lifecycle-empty {
+  padding: 10px;
 }
 .drawer select,
 .drawer input[type="text"] {

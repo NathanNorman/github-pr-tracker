@@ -7,7 +7,8 @@ import {
   TAG_COLOR_TOKENS,
   TAG_COLORS
 } from "./constants.js";
-import { debounce, now } from "./utils.js";
+import { summarizeLifecyclePhases } from "./pr-lifecycle.js";
+import { calendarDaysSince, debounce, normalizeHttpUrl, now } from "./utils.js";
 
 const STATUS_LABELS = {
   unsorted: "Unsorted",
@@ -450,9 +451,16 @@ export function createUi(container, handlers) {
       rowIcon.setAttribute("aria-hidden", "true");
       const rowCopy = doc.createElement("span");
       rowCopy.className = "row-copy";
+      const headerLine = doc.createElement("span");
+      headerLine.className = "row-header";
       const repo = doc.createElement("span");
       repo.className = "repo";
       repo.textContent = `${summary.owner}/${summary.repo} #${summary.number}`;
+      headerLine.append(repo);
+      const ageBadge = makeAgeBadge(summary.createdAt, state.currentTime);
+      if (ageBadge) {
+        headerLine.append(ageBadge);
+      }
       const title = doc.createElement("span");
       title.className = "title";
       title.textContent = summary.title;
@@ -485,6 +493,11 @@ export function createUi(container, handlers) {
         details.append(metadata);
       }
 
+      const jiraLinks = renderJiraLinks(summary.jiraReferences);
+      if (jiraLinks) {
+        details.append(jiraLinks);
+      }
+
       const statusLines = doc.createElement("span");
       statusLines.className = "row-status-lines";
       appendNativeStatus(statusLines, "review", summary.review, REVIEW_ROW_LABELS);
@@ -496,9 +509,9 @@ export function createUi(container, handlers) {
         const blocker = doc.createElement("span");
         blocker.className = "blocker-preview";
         blocker.textContent = `Blocked by ${record.blockedBy}`;
-        rowCopy.append(repo, title, details, blocker);
+        rowCopy.append(headerLine, title, details, blocker);
       } else {
-        rowCopy.append(repo, title, details);
+        rowCopy.append(headerLine, title, details);
       }
 
       if (record.notes) {
@@ -610,6 +623,8 @@ export function createUi(container, handlers) {
     drawerView.identityTitle.textContent = summary?.title || state.selectedKey;
     drawerView.identityRepo.textContent = summary ? `${summary.owner}/${summary.repo} #${summary.number}` : state.selectedKey;
     drawerView.link.href = summary?.url || "#";
+    syncDrawerJiraLinks(drawerView, summary?.jiraReferences);
+    renderLifecycle(drawerView, summary?.lifecycle);
 
     drawerView.mergeButton.textContent = selectedActionPending && state.prAction.type === "merge" ? "Merging…" : "Squash & merge";
     drawerView.mergeButton.disabled = actionPending;
@@ -683,7 +698,18 @@ export function createUi(container, handlers) {
     identityTitle.className = "title";
     const identityRepo = doc.createElement("div");
     identityRepo.className = "repo";
-    identity.append(identityTitle, identityRepo);
+    const identityJira = doc.createElement("div");
+    identityJira.className = "identity-jira";
+    identity.append(identityTitle, identityRepo, identityJira);
+
+    const lifecycle = doc.createElement("section");
+    lifecycle.className = "field lifecycle";
+    const lifecycleLabel = doc.createElement("div");
+    lifecycleLabel.className = "field-label";
+    lifecycleLabel.textContent = "Lifecycle";
+    const lifecycleList = doc.createElement("div");
+    lifecycleList.className = "lifecycle-list";
+    lifecycle.append(lifecycleLabel, lifecycleList);
 
     const prActions = doc.createElement("section");
     prActions.className = "pr-actions";
@@ -824,9 +850,11 @@ export function createUi(container, handlers) {
     Object.assign(view, {
       key: selectedKey,
       closeComment: "",
-      nodes: [header, identity, prActions, statusField, blockerField, tagsField, notesField, footer],
+      nodes: [header, identity, lifecycle, prActions, statusField, blockerField, tagsField, notesField, footer],
       identityTitle,
       identityRepo,
+      identityJira,
+      lifecycleList,
       prActions,
       prActionButtons,
       mergeButton,
@@ -1084,6 +1112,17 @@ export function createUi(container, handlers) {
     return badge;
   }
 
+  function makeAgeBadge(createdAt, currentTime) {
+    const days = calendarDaysSince(createdAt, currentTime);
+    if (!Number.isInteger(days)) {
+      return null;
+    }
+    const badge = makeBadge("Age", `${days}d`, "age");
+    badge.classList.add("age-badge");
+    badge.setAttribute("aria-label", `${days} ${days === 1 ? "day" : "days"} old`);
+    return badge;
+  }
+
   function appendKnownBadge(target, label, value, kind = label.toLowerCase()) {
     if (value && value !== "unknown") {
       target.append(makeBadge(label, value, kind));
@@ -1111,6 +1150,45 @@ export function createUi(container, handlers) {
     pill.style.borderColor = tokens.border;
     pill.addEventListener("click", onClick);
     return pill;
+  }
+
+  function renderJiraLinks(references) {
+    const validReferences = Array.isArray(references)
+      ? references
+        .map((reference) => {
+          const key = typeof reference?.key === "string" ? reference.key : "";
+          const url = normalizeHttpUrl(reference?.url);
+          return key && url ? { key, url } : null;
+        })
+        .filter(Boolean)
+      : [];
+    if (!validReferences.length) {
+      return null;
+    }
+    const links = doc.createElement("span");
+    links.className = "jira-links";
+    for (const reference of validReferences) {
+      const link = doc.createElement("a");
+      link.className = "jira-link";
+      link.href = reference.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = reference.key;
+      link.setAttribute("aria-label", `Open Jira issue ${reference.key}`);
+      links.append(link);
+    }
+    return links;
+  }
+
+  function syncDrawerJiraLinks(view, references) {
+    view.identityJira.textContent = "";
+    const links = renderJiraLinks(references);
+    if (links) {
+      view.identityJira.append(links);
+      view.identityJira.hidden = false;
+      return;
+    }
+    view.identityJira.hidden = true;
   }
 
   function makeActionButton(label, onClick, className) {
@@ -1293,6 +1371,40 @@ function formatRelativeTime(value) {
 function compactNote(value) {
   const text = String(value).replace(/\s+/g, " ").trim();
   return text.length > 110 ? `Note · ${text.slice(0, 107)}…` : `Note · ${text}`;
+}
+
+function renderLifecycle(view, lifecycle) {
+  view.lifecycleList.textContent = "";
+  const rows = summarizeLifecyclePhases(lifecycle);
+  if (!rows.length) {
+    const empty = view.lifecycleList.ownerDocument.createElement("div");
+    empty.className = "lifecycle-empty";
+    empty.textContent = "No lifecycle timing captured yet.";
+    view.lifecycleList.append(empty);
+    return;
+  }
+  for (const row of rows) {
+    const item = view.lifecycleList.ownerDocument.createElement("div");
+    item.className = "lifecycle-row";
+
+    const label = view.lifecycleList.ownerDocument.createElement("span");
+    label.className = "lifecycle-row-label";
+    label.textContent = row.label;
+
+    const detail = view.lifecycleList.ownerDocument.createElement("span");
+    detail.className = "lifecycle-row-detail";
+    detail.textContent = row.detail;
+    item.append(label, detail);
+
+    if (row.note) {
+      const note = view.lifecycleList.ownerDocument.createElement("span");
+      note.className = "lifecycle-row-note";
+      note.textContent = row.note;
+      item.append(note);
+    }
+
+    view.lifecycleList.append(item);
+  }
 }
 
 function summarizeSort(sortPreferences, groupOptions, sortOptions) {

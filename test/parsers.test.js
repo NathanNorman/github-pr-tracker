@@ -180,6 +180,36 @@ test("detail parser falls back to semantic DOM states", async () => {
   });
 });
 
+test("detail parser extracts creation time and Jira references from the PR page", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <div class="gh-header-meta">
+      <relative-time datetime="2026-08-04T14:30:00Z"></relative-time>
+    </div>
+    <a href="https://toasttab.atlassian.net/browse/ENG-42">ENG-42</a>
+    <a href="https://toasttab.atlassian.net/browse/PLAT-7">Platform work for PLAT-7</a>
+    <a href="https://example.com/not-jira">ENG-42</a>
+    <a href="https://toasttab.atlassian.net/browse/OPS-9">ENG-42</a>
+  `, "https://github.toasttab.com/acme/api/pull/12"));
+
+  assert.equal(detail.createdAt, "2026-08-04T14:30:00Z");
+  assert.equal(detail.jiraBaseUrl, "https://toasttab.atlassian.net/browse/");
+  assert.deepEqual(detail.jiraReferences, [
+    { key: "ENG-42", url: "https://toasttab.atlassian.net/browse/ENG-42" },
+    { key: "PLAT-7", url: "https://toasttab.atlassian.net/browse/PLAT-7" }
+  ]);
+});
+
+test("detail parser ignores jira-looking labels when the href is unrelated or mismatched", () => {
+  const detail = parsePrDetailDocument(parseHtml(`
+    <a href="https://example.com/not-jira">ENG-42</a>
+    <a href="https://toasttab.atlassian.net/browse/OPS-9">ENG-42</a>
+    <a href="javascript:alert('xss')">SEC-1</a>
+  `, "https://github.toasttab.com/acme/api/pull/12"));
+
+  assert.equal(detail.jiraBaseUrl, undefined);
+  assert.equal(detail.jiraReferences, undefined);
+});
+
 test("detail parser uses the current merge-box rollup instead of an older failed commit", async () => {
   const detail = parsePrDetailDocument(parseHtml(await fixture("detail-mixed-states.html")));
   assert.deepEqual(detail, {

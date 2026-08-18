@@ -1,5 +1,5 @@
 import { CHECK_STATES, GITHUB_ORIGIN, MERGE_STATES, REVIEW_STATES } from "./constants.js";
-import { safeJsonParse } from "./utils.js";
+import { extractJiraIssueKeys, normalizeHttpUrl, safeJsonParse, text } from "./utils.js";
 
 function normalizeReviewState(value) {
   const normalized = String(value || "").toLowerCase();
@@ -61,6 +61,7 @@ export function parsePrDetailPayload(payload) {
   const reviewState = payload.reviewDecision || payload.review_state || payload.currentReviewState;
   const checksState = payload.statusCheckRollup?.state || payload.checks_state || payload.checkState;
   const mergeState = payload.mergeStateStatus || payload.merge_state || payload.mergeState;
+  const createdAt = normalizeTimestamp(payload.createdAt || payload.created_at);
   const draft = typeof payload.isDraft === "boolean"
     ? payload.isDraft
     : typeof payload.draft === "boolean"
@@ -70,15 +71,19 @@ export function parsePrDetailPayload(payload) {
         : payload.state === "OPEN"
           ? false
           : undefined;
-  if (!reviewState && !checksState && !mergeState && typeof draft !== "boolean") {
+  if (!reviewState && !checksState && !mergeState && typeof draft !== "boolean" && !createdAt) {
     return null;
   }
-  return {
+  const detail = {
     review: normalizeReviewState(reviewState || "unknown"),
     checks: normalizeCheckState(checksState || "unknown"),
     merge: normalizeMergeState(mergeState || "unknown"),
     draft: typeof draft === "boolean" ? draft : undefined
   };
+  if (createdAt) {
+    detail.createdAt = createdAt;
+  }
+  return detail;
 }
 
 function findEmbeddedPayload(doc, baseUrl) {
@@ -242,8 +247,18 @@ function detailFromDom(doc) {
   const draft = /draft/i.test(doc.querySelector('[aria-label="Pull request state"]')?.textContent || "")
     ? true
     : undefined;
-
-  return { review, checks, merge, draft };
+  const createdAt = createdAtFromDom(doc);
+  const jiraReferences = extractJiraReferences(doc);
+  const jiraBaseUrl = jiraBaseUrlFromReferences(jiraReferences);
+  return {
+    review,
+    checks,
+    merge,
+    draft,
+    ...(createdAt ? { createdAt } : {}),
+    ...(jiraReferences.length ? { jiraReferences } : {}),
+    ...(jiraBaseUrl ? { jiraBaseUrl } : {})
+  };
 }
 
 export function parsePrDetailDocument(doc, baseUrl = doc?.URL) {
@@ -370,6 +385,10 @@ export function mergeNativeDetails(primary, fallback) {
     merge: left.merge && left.merge !== "unknown" ? left.merge : right.merge || "unknown",
     draft: typeof left.draft === "boolean" ? left.draft : right.draft
   };
+  const createdAt = normalizeTimestamp(left.createdAt || right.createdAt);
+  if (createdAt) {
+    merged.createdAt = createdAt;
+  }
   const unresolvedThreads = Number.isInteger(left.unresolvedThreads)
     ? left.unresolvedThreads
     : Number.isInteger(right.unresolvedThreads)
@@ -378,7 +397,125 @@ export function mergeNativeDetails(primary, fallback) {
   if (Number.isInteger(unresolvedThreads) && unresolvedThreads >= 0) {
     merged.unresolvedThreads = unresolvedThreads;
   }
+  const jiraReferences = normalizeJiraReferences(
+    Array.isArray(left.jiraReferences) && left.jiraReferences.length ? left.jiraReferences : right.jiraReferences
+  );
+  if (jiraReferences.length) {
+    merged.jiraReferences = jiraReferences;
+  }
+  const jiraBaseUrl = normalizeJiraBaseUrl(left.jiraBaseUrl || right.jiraBaseUrl);
+  if (jiraBaseUrl) {
+    merged.jiraBaseUrl = jiraBaseUrl;
+  }
   return merged;
+}
+
+function normalizeTimestamp(value) {
+  const raw = text(value).trim();
+  if (!raw) {
+    return "";
+  }
+  return Number.isNaN(new Date(raw).getTime()) ? "" : raw;
+}
+
+function createdAtFromDom(doc) {
+  const selectors = [
+    ".gh-header-meta relative-time[datetime]",
+    '[data-test-selector="pr-timestamp"] relative-time[datetime]',
+    ".timeline-comment-header relative-time[datetime]",
+    "relative-time[datetime]"
+  ];
+  for (const selector of selectors) {
+    const timestamp = normalizeTimestamp(doc.querySelector(selector)?.getAttribute("datetime"));
+    if (timestamp) {
+      return timestamp;
+    }
+  }
+  return "";
+}
+
+function extractJiraReferences(doc) {
+  const references = [];
+  const seenKeys = new Set();
+  for (const anchor of doc.querySelectorAll("a[href]")) {
+    const reference = jiraReferenceFromAnchor(anchor, doc.baseURI);
+    if (!reference || seenKeys.has(reference.key)) {
+      continue;
+    }
+    seenKeys.add(reference.key);
+    references.push(reference);
+  }
+  return references;
+}
+
+function jiraReferenceFromAnchor(anchor, baseUrl = GITHUB_ORIGIN) {
+  const url = normalizeReferenceUrl(anchor.getAttribute("href"), baseUrl);
+  if (!url) {
+    return null;
+  }
+  const browseKey = extractIssueKeysFromBrowseUrl(url)[0] || "";
+  const labelKey = extractJiraIssueKeys(anchor.textContent)[0] || "";
+  if (!browseKey || (labelKey && labelKey !== browseKey)) {
+    return null;
+  }
+  return { key: browseKey, url };
+}
+
+function extractIssueKeysFromBrowseUrl(url) {
+  const match = String(url).match(/\/browse\/([A-Z][A-Z0-9]+-\d+)(?:[/?#]|$)/gi) || [];
+  return match
+    .map((entry) => entry.match(/([A-Z][A-Z0-9]+-\d+)/i)?.[1]?.toUpperCase() || "")
+    .filter(Boolean);
+}
+
+function normalizeReferenceUrl(value, baseUrl = GITHUB_ORIGIN) {
+  return normalizeHttpUrl(value, baseUrl);
+}
+
+function normalizeJiraReferences(references) {
+  const normalized = [];
+  const seenKeys = new Set();
+  for (const reference of Array.isArray(references) ? references : []) {
+    const key = extractJiraIssueKeys(reference?.key)[0] || "";
+    const url = normalizeReferenceUrl(reference?.url);
+    if (!key || !url || seenKeys.has(key)) {
+      continue;
+    }
+    seenKeys.add(key);
+    normalized.push({ key, url });
+  }
+  return normalized;
+}
+
+function jiraBaseUrlFromReferences(references) {
+  for (const reference of references) {
+    const baseUrl = normalizeJiraBaseUrl(reference?.url, reference?.key);
+    if (baseUrl) {
+      return baseUrl;
+    }
+  }
+  return "";
+}
+
+function normalizeJiraBaseUrl(value, issueKey = "") {
+  const url = normalizeReferenceUrl(value);
+  if (!url) {
+    return "";
+  }
+  if (/\/browse\/?$/i.test(new URL(url).pathname)) {
+    return url.endsWith("/") ? url : `${url}/`;
+  }
+  const key = extractJiraIssueKeys(issueKey)[0] || extractIssueKeysFromBrowseUrl(url)[0] || "";
+  if (!key) {
+    return "";
+  }
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(new RegExp(`^(.*\\/browse\\/)${key}$`, "i"));
+    return match ? `${parsed.origin}${match[1]}` : "";
+  } catch {
+    return "";
+  }
 }
 
 function isResolvedThread(thread) {

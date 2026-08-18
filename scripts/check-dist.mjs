@@ -8,6 +8,10 @@ const root = path.resolve(new URL("..", import.meta.url).pathname);
 const distFile = path.join(root, "dist", "github-pr-tracker.user.js");
 const source = await readFile(distFile, "utf8");
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+const packageLock = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
+if (packageLock.version !== packageJson.version || packageLock.packages?.[""]?.version !== packageJson.version) {
+  throw new Error("package-lock.json version does not match package.json.");
+}
 const headerMatches = source.match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/g) || [];
 if (headerMatches.length !== 1) {
   throw new Error(`Expected exactly one userscript header, found ${headerMatches.length}.`);
