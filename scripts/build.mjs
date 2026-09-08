@@ -12,12 +12,12 @@ const metadata = `// ==UserScript==
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
 // @version      ${userscriptVersion}
-// @description  Personal pull request tracker for your own open Toast GitHub PRs.
+// @description  Personal pull request tracker for your own open GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
 // @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=${userscriptVersion}
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
-// @match        https://github.toasttab.com/pulls*
+// @match        https://github.com/pulls*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener

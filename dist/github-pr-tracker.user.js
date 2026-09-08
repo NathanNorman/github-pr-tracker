@@ -2,12 +2,12 @@
 // @name         GitHub Personal PR Tracker
 // @namespace    https://github.com/
 // @version      1.10.0
-// @description  Personal pull request tracker for your own open Toast GitHub PRs.
+// @description  Personal pull request tracker for your own open GitHub PRs.
 // @homepageURL  https://github.com/NathanNorman/github-pr-tracker
 // @supportURL   https://github.com/NathanNorman/github-pr-tracker/issues
 // @downloadURL  https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?version=1.10.0
 // @updateURL    https://raw.githubusercontent.com/NathanNorman/github-pr-tracker/main/dist/github-pr-tracker.user.js?channel=stable
-// @match        https://github.toasttab.com/pulls*
+// @match        https://github.com/pulls*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addValueChangeListener
@@ -19,7 +19,7 @@
 (() => {
   // src/constants.js
   var APP_ID = "tm-github-pr-tracker";
-  var GITHUB_ORIGIN = "https://github.toasttab.com";
+  var GITHUB_ORIGIN = "https://github.com";
   var SCHEMA_VERSION = 1;
   var DETAIL_CACHE_TTL_MS = 10 * 60 * 1e3;
   var DETAIL_PARSER_VERSION = 10;

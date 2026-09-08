@@ -81,7 +81,7 @@ test("normalizeEnvelope namespaces records for account", () => {
         parserVersion: 2,
         detail: { checks: "passing" },
         headSha: "abc123",
-        checksUrl: "https://github.toasttab.com/acme/api/commit/abc123/status-details?popover=true"
+        checksUrl: "https://github.com/acme/api/commit/abc123/status-details?popover=true"
       }
     }
   }, "octocat");

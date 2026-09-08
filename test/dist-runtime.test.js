@@ -8,7 +8,7 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><main><div>Native pulls</div></main></body></html>',
     {
-      url: "https://github.toasttab.com/pulls#pr-tracker",
+      url: "https://github.com/pulls#pr-tracker",
       pretendToBeVisual: true,
       runScripts: "outside-only"
     }
@@ -54,12 +54,12 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
 test("built userscript keeps a green authored-list current head authoritative over stale PR failure markup", async () => {
   const source = await readFile(new URL("../dist/github-pr-tracker.user.js", import.meta.url), "utf8");
   const headSha = "c90c99a44c02d34e8717d83fa00dab560b218d6d";
-  const prUrl = "https://github.toasttab.com/toasttab/toast-labor/pull/704";
+  const prUrl = "https://github.com/toasttab/toast-labor/pull/704";
   const requests = [];
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><main><div>Native pulls</div></main></body></html>',
     {
-      url: "https://github.toasttab.com/pulls#pr-tracker",
+      url: "https://github.com/pulls#pr-tracker",
       pretendToBeVisual: true,
       runScripts: "outside-only"
     }
@@ -76,7 +76,7 @@ test("built userscript keeps a green authored-list current head authoritative ov
         updatedAt: Date.now(),
         parserVersion: 9,
         headSha,
-        checksUrl: `https://github.toasttab.com/toasttab/toast-labor/commit/${headSha}/status-details?popover=true`,
+        checksUrl: `https://github.com/toasttab/toast-labor/commit/${headSha}/status-details?popover=true`,
         detail: { review: "approved", checks: "failing", merge: "blocked", draft: false }
       }
     }
@@ -91,7 +91,7 @@ test("built userscript keeps a green authored-list current head authoritative ov
   window.GM_addValueChangeListener = () => 1;
   window.GM_removeValueChangeListener = () => {};
   window.fetch = async (rawUrl, options = {}) => {
-    const url = new URL(String(rawUrl), "https://github.toasttab.com");
+    const url = new URL(String(rawUrl), "https://github.com");
     requests.push({ url: url.href, accept: options.headers?.Accept || "" });
     if (url.pathname === "/pulls" && url.searchParams.has("q")) {
       return response(`
@@ -154,11 +154,11 @@ test("built userscript keeps a green authored-list current head authoritative ov
 
 test("built userscript keeps note and private-label editors mounted across remote storage rerenders", async () => {
   const source = await readFile(new URL("../dist/github-pr-tracker.user.js", import.meta.url), "utf8");
-  const prUrl = "https://github.toasttab.com/acme/api/pull/1";
+  const prUrl = "https://github.com/acme/api/pull/1";
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><input id="github-search" type="search"><main><div>Native pulls</div></main></body></html>',
     {
-      url: "https://github.toasttab.com/pulls#pr-tracker",
+      url: "https://github.com/pulls#pr-tracker",
       pretendToBeVisual: true,
       runScripts: "outside-only"
     }
@@ -188,7 +188,7 @@ test("built userscript keeps note and private-label editors mounted across remot
   };
   window.GM_removeValueChangeListener = () => {};
   window.fetch = async (rawUrl) => {
-    const url = new URL(String(rawUrl), "https://github.toasttab.com");
+    const url = new URL(String(rawUrl), "https://github.com");
     if (url.pathname === "/pulls" && url.searchParams.has("q")) {
       return response('<div data-issue-and-pr-hovercards-enabled="true"><a data-hovercard-type="pull_request" href="/acme/api/pull/1">Fix input focus</a></div>');
     }

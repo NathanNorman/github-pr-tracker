@@ -7,7 +7,7 @@ const summary = {
   owner: "acme",
   repo: "api",
   number: 12,
-  url: "https://github.toasttab.com/acme/api/pull/12"
+  url: "https://github.com/acme/api/pull/12"
 };
 
 function mergePage(action = "/acme/api/pull/12/merge") {
@@ -53,7 +53,7 @@ test("squashMergePullRequest refreshes the form and posts the exact squash paylo
   assert.equal(calls.length, 2);
   assert.equal(calls[0].url, summary.url);
   assert.equal(calls[0].options.credentials, "include");
-  assert.equal(calls[1].url, "https://github.toasttab.com/acme/api/pull/12/merge");
+  assert.equal(calls[1].url, "https://github.com/acme/api/pull/12/merge");
   assert.equal(calls[1].options.method, "POST");
   assert.equal(calls[1].options.credentials, "include");
   assert.equal(calls[1].options.headers["Content-Type"], "application/x-www-form-urlencoded;charset=UTF-8");
@@ -73,7 +73,7 @@ test("closePullRequest posts an empty optional comment and the native close subm
   };
 
   assert.deepEqual(await closePullRequest({ fetchImpl, parser, summary }), { state: "closed" });
-  assert.equal(calls[1].url, "https://github.toasttab.com/acme/api/pull/12/comment?sticky=true");
+  assert.equal(calls[1].url, "https://github.com/acme/api/pull/12/comment?sticky=true");
   assert.equal(
     calls[1].options.body,
     "authenticity_token=close-token&comment%5Bbody%5D=&comment_and_close=1"

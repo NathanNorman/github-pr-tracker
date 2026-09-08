@@ -137,7 +137,7 @@ test("search and notes keep focus and value across updates", async () => {
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -192,7 +192,7 @@ test("list rows render an age badge and Jira references as links", async () => {
         repo: "api",
         number: 1,
         title: "ENG-42 Fix CI",
-        url: "https://github.toasttab.com/acme/api/pull/1",
+        url: "https://github.com/acme/api/pull/1",
         draft: false,
         createdAt: createdAt.toISOString(),
         jiraReferences: [
@@ -253,7 +253,7 @@ test("unsafe imported jira urls do not render as links", async () => {
         repo: "api",
         number: 1,
         title: "SEC-1 Harden parser",
-        url: "https://github.toasttab.com/acme/api/pull/1",
+        url: "https://github.com/acme/api/pull/1",
         draft: false,
         jiraReferences: [
           { key: "SEC-1", url: "javascript:alert('xss')" }
@@ -296,7 +296,7 @@ test("drawer editors contain keyboard events so GitHub search cannot steal focus
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -348,7 +348,7 @@ test("drawer note and private-label drafts keep the same focused field across st
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Fix CI", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -446,7 +446,7 @@ test("note saves drain safely when a second edit arrives during an in-flight wri
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -501,8 +501,8 @@ test("detached stale drawer editors keep targeting their original PR key", async
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.com/acme/api/pull/2", draft: false }
       ]
     },
     detailCache: {}
@@ -573,7 +573,7 @@ test("failed note persistence keeps the draft visible and can retry later", asyn
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -631,8 +631,8 @@ test("a completed save for another PR does not clear the selected PR saving indi
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.com/acme/api/pull/2", draft: false }
       ]
     },
     detailCache: {}
@@ -695,8 +695,8 @@ test("pending edits stay keyed to the correct PR and flush on close", async () =
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.com/acme/api/pull/2", draft: false }
       ]
     },
     detailCache: {}
@@ -735,7 +735,7 @@ test("pending edits stay keyed to the correct PR and flush on close", async () =
 });
 
 test("refresh preserves concurrent personal edits made during fetch", async () => {
-  const dom = makeDom("https://github.toasttab.com/pulls");
+  const dom = makeDom("https://github.com/pulls");
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {
@@ -833,7 +833,7 @@ test("detail refresh invalidates older parser results, merges deferred fields, a
 });
 
 test("drawer renders lifecycle timing from the stored observation snapshot", async () => {
-  const dom = makeDom("https://github.toasttab.com/pulls");
+  const dom = makeDom("https://github.com/pulls");
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {
@@ -847,7 +847,7 @@ test("drawer renders lifecycle timing from the stored observation snapshot", asy
         repo: "api",
         number: 1,
         title: "Lifecycle timing",
-        url: "https://github.toasttab.com/acme/api/pull/1",
+        url: "https://github.com/acme/api/pull/1",
         draft: false,
         lifecycle: {
           observedAt: "2026-08-03T16:00:00.000Z",
@@ -1081,7 +1081,7 @@ test("lifecycle history falls back to the persisted open-list summary when detai
           repo: "api",
           number: 1,
           title: "One",
-          url: "https://github.toasttab.com/acme/api/pull/1",
+          url: "https://github.com/acme/api/pull/1",
           draft: false,
           lifecycle: previousLifecycle
         }]
@@ -1194,7 +1194,7 @@ test("a warm same-head failure cache cannot override a green authored-list statu
         updatedAt: Date.now(),
         parserVersion: DETAIL_PARSER_VERSION,
         headSha: sha,
-        checksUrl: `https://github.toasttab.com/acme/api/commit/${sha}/status-details?popover=true`,
+        checksUrl: `https://github.com/acme/api/commit/${sha}/status-details?popover=true`,
         detail: { review: "approved", checks: "failing", merge: "blocked", draft: false }
       }
     }
@@ -1252,7 +1252,7 @@ test("detail refresh prefers the exact current-head icon over stale main and his
         updatedAt: Date.now(),
         parserVersion: DETAIL_PARSER_VERSION,
         headSha: sha,
-        checksUrl: `https://github.toasttab.com/acme/api/commit/${sha}/status-details?popover=true`,
+        checksUrl: `https://github.com/acme/api/commit/${sha}/status-details?popover=true`,
         detail: { review: "approved", checks: "failing", merge: "blocked", draft: false }
       }
     }
@@ -1529,7 +1529,7 @@ test("refresh merges per-key cache writes into latest storage without reviving d
 });
 
 test("default sort is updated desc then repository asc with invalid timestamps last", async () => {
-  const dom = makeDom("https://github.toasttab.com/pulls");
+  const dom = makeDom("https://github.com/pulls");
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {},
@@ -1537,9 +1537,9 @@ test("default sort is updated desc then repository asc with invalid timestamps l
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/zebra#5", owner: "acme", repo: "zebra", number: 5, title: "Five", url: "https://github.toasttab.com/acme/zebra/pull/5", updatedAt: "2026-08-05T10:00:00Z" },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.toasttab.com/acme/api/pull/2", updatedAt: "2026-08-06T10:00:00Z" },
-        { key: "acme/core#1", owner: "acme", repo: "core", number: 1, title: "One", url: "https://github.toasttab.com/acme/core/pull/1", updatedAt: "invalid-date" }
+        { key: "acme/zebra#5", owner: "acme", repo: "zebra", number: 5, title: "Five", url: "https://github.com/acme/zebra/pull/5", updatedAt: "2026-08-05T10:00:00Z" },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Two", url: "https://github.com/acme/api/pull/2", updatedAt: "2026-08-06T10:00:00Z" },
+        { key: "acme/core#1", owner: "acme", repo: "core", number: 1, title: "One", url: "https://github.com/acme/core/pull/1", updatedAt: "invalid-date" }
       ]
     },
     detailCache: {}
@@ -1566,8 +1566,8 @@ test("sort menu can disable secondary sort and persists null", async () => {
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Bravo", url: "https://github.toasttab.com/acme/api/pull/2", updatedAt: "2026-08-06T10:00:00Z", review: "approved" },
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Alpha", url: "https://github.toasttab.com/acme/api/pull/1", updatedAt: "2026-08-06T10:00:00Z", review: "approved" }
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Bravo", url: "https://github.com/acme/api/pull/2", updatedAt: "2026-08-06T10:00:00Z", review: "approved" },
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Alpha", url: "https://github.com/acme/api/pull/1", updatedAt: "2026-08-06T10:00:00Z", review: "approved" }
       ]
     },
     detailCache: {}
@@ -1619,9 +1619,9 @@ test("primary repository sorting renders separate sections and secondary updated
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Archive", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/3", updatedAt: 30 },
-        { key: "toasttab/toast-analytics#1", owner: "toasttab", repo: "toast-analytics", number: 1, title: "Older", url: "https://github.toasttab.com/toasttab/toast-analytics/pull/1", updatedAt: 10 },
-        { key: "toasttab/toast-analytics#2", owner: "toasttab", repo: "toast-analytics", number: 2, title: "Newer", url: "https://github.toasttab.com/toasttab/toast-analytics/pull/2", updatedAt: 20 }
+        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Archive", url: "https://github.com/toasttab/toast-archiving/pull/3", updatedAt: 30 },
+        { key: "toasttab/toast-analytics#1", owner: "toasttab", repo: "toast-analytics", number: 1, title: "Older", url: "https://github.com/toasttab/toast-analytics/pull/1", updatedAt: 10 },
+        { key: "toasttab/toast-analytics#2", owner: "toasttab", repo: "toast-analytics", number: 2, title: "Newer", url: "https://github.com/toasttab/toast-analytics/pull/2", updatedAt: 20 }
       ]
     },
     detailCache: {}
@@ -1666,9 +1666,9 @@ test("group sections collapse to only the header row and survive unrelated reren
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/apex-copilot#2", owner: "toasttab", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/2", updatedAt: 10 },
-        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Three", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/3", updatedAt: 30 }
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/apex-copilot#2", owner: "toasttab", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.com/toasttab/apex-copilot/pull/2", updatedAt: 10 },
+        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Three", url: "https://github.com/toasttab/toast-archiving/pull/3", updatedAt: 30 }
       ]
     },
     detailCache: {}
@@ -1746,9 +1746,9 @@ test("collapsed group state is isolated by grouping field and restored when swit
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/apex-copilot#2", owner: "toasttab", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/2", updatedAt: 10 },
-        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Three", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/3", updatedAt: 30 }
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/apex-copilot#2", owner: "toasttab", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.com/toasttab/apex-copilot/pull/2", updatedAt: 10 },
+        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Three", url: "https://github.com/toasttab/toast-archiving/pull/3", updatedAt: 30 }
       ]
     },
     detailCache: {}
@@ -1806,8 +1806,8 @@ test("collapsed groups persist across app reloads and expansion removes only the
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
       ]
     },
     detailCache: {},
@@ -1896,8 +1896,8 @@ test("remote collapsed-group storage updates rerender and preserve later toggles
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
       ]
     },
     detailCache: {},
@@ -1949,8 +1949,8 @@ test("failed collapsed-group persistence rolls back after an optimistic toggle a
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.toasttab.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.toasttab.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
+        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
       ]
     },
     detailCache: {},
@@ -2002,9 +2002,9 @@ test("filter popover persists structured filters, filters before grouping, and c
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Draft API", url: "https://github.toasttab.com/acme/api/pull/1", draft: true, review: "approved", checks: "passing", updatedAt: 10 },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Ready API", url: "https://github.toasttab.com/acme/api/pull/2", draft: false, review: "approved", checks: "passing", updatedAt: 20 },
-        { key: "acme/web#3", owner: "acme", repo: "web", number: 3, title: "Ready Web", url: "https://github.toasttab.com/acme/web/pull/3", draft: false, review: "required", checks: "failing", updatedAt: 30 }
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Draft API", url: "https://github.com/acme/api/pull/1", draft: true, review: "approved", checks: "passing", updatedAt: 10 },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Ready API", url: "https://github.com/acme/api/pull/2", draft: false, review: "approved", checks: "passing", updatedAt: 20 },
+        { key: "acme/web#3", owner: "acme", repo: "web", number: 3, title: "Ready Web", url: "https://github.com/acme/web/pull/3", draft: false, review: "required", checks: "failing", updatedAt: 30 }
       ]
     },
     detailCache: {}
@@ -2072,7 +2072,7 @@ test("invalid nested buttons are avoided and row selection remains keyboard-acce
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -2100,8 +2100,8 @@ test("review and check states render independently on separate status lines", as
   const dom = makeDom();
   const cachedAt = Date.now();
   const items = [
-    { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Approved with failing checks", url: "https://github.toasttab.com/acme/api/pull/1", draft: false },
-    { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Review needed with passing checks", url: "https://github.toasttab.com/acme/api/pull/2", draft: false }
+    { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Approved with failing checks", url: "https://github.com/acme/api/pull/1", draft: false },
+    { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Review needed with passing checks", url: "https://github.com/acme/api/pull/2", draft: false }
   ];
   const storage = makeStorage({
     accountLogin: "octocat",
@@ -2152,7 +2152,7 @@ test("Escape and outside pointer presses dismiss disclosures and the PR panel", 
     records: {},
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -2204,7 +2204,7 @@ test("each row surfaces its unresolved-thread count and a direct GitHub link", a
         repo: "api",
         number: 1,
         title: "One",
-        url: "https://github.toasttab.com/acme/api/pull/1",
+        url: "https://github.com/acme/api/pull/1",
         draft: false,
         unresolvedThreads: 3
       }]
@@ -2215,7 +2215,7 @@ test("each row surfaces its unresolved-thread count and a direct GitHub link", a
   await app.init();
   const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
   const openLink = shadow.querySelector(".row-open-link");
-  assert.equal(openLink.href, "https://github.toasttab.com/acme/api/pull/1");
+  assert.equal(openLink.href, "https://github.com/acme/api/pull/1");
   assert.equal(openLink.target, "_blank");
   assert.equal(openLink.rel, "noreferrer");
   assert.equal(openLink.closest("button"), null);
@@ -2237,7 +2237,7 @@ test("eligible PR rows merge directly without selecting the row and prevent dupl
     records: { "acme/api#1": { status: "next_up", blockedBy: "", notes: "keep", tags: [], modifiedAt: 1 } },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false, merge: "clean" }]
     },
     detailCache: { "acme/api#1": { updatedAt: 1, parserVersion: DETAIL_PARSER_VERSION, detail: { merge: "clean" } } }
   });
@@ -2331,8 +2331,8 @@ test("a direct row merge preserves the open drawer for a different pull request"
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Ready", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Keep open", url: "https://github.toasttab.com/acme/api/pull/2", draft: false, merge: "blocked" }
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Ready", url: "https://github.com/acme/api/pull/1", draft: false, merge: "clean" },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Keep open", url: "https://github.com/acme/api/pull/2", draft: false, merge: "blocked" }
       ]
     },
     detailCache: {}
@@ -2383,11 +2383,11 @@ test("row merge actions are hidden for blocked and draft pull requests", async (
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Ready", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" },
-        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Blocked", url: "https://github.toasttab.com/acme/api/pull/2", draft: false, merge: "blocked" },
-        { key: "acme/api#3", owner: "acme", repo: "api", number: 3, title: "Draft", url: "https://github.toasttab.com/acme/api/pull/3", draft: true, merge: "clean" },
-        { key: "acme/api#4", owner: "acme", repo: "api", number: 4, title: "Conflicting", url: "https://github.toasttab.com/acme/api/pull/4", draft: false, merge: "conflicting" },
-        { key: "acme/api#5", owner: "acme", repo: "api", number: 5, title: "Unknown", url: "https://github.toasttab.com/acme/api/pull/5", draft: false, merge: "unknown" }
+        { key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "Ready", url: "https://github.com/acme/api/pull/1", draft: false, merge: "clean" },
+        { key: "acme/api#2", owner: "acme", repo: "api", number: 2, title: "Blocked", url: "https://github.com/acme/api/pull/2", draft: false, merge: "blocked" },
+        { key: "acme/api#3", owner: "acme", repo: "api", number: 3, title: "Draft", url: "https://github.com/acme/api/pull/3", draft: true, merge: "clean" },
+        { key: "acme/api#4", owner: "acme", repo: "api", number: 4, title: "Conflicting", url: "https://github.com/acme/api/pull/4", draft: false, merge: "conflicting" },
+        { key: "acme/api#5", owner: "acme", repo: "api", number: 5, title: "Unknown", url: "https://github.com/acme/api/pull/5", draft: false, merge: "unknown" }
       ]
     },
     detailCache: {}
@@ -2411,7 +2411,7 @@ test("a failed direct row merge exposes an alert while the drawer stays closed",
     records: {},
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false, merge: "clean" }]
     },
     detailCache: {}
   });
@@ -2473,7 +2473,7 @@ test("a failed drawer merge announces the error only once", async () => {
     records: {},
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false, merge: "clean" }]
     },
     detailCache: {}
   });
@@ -2509,7 +2509,7 @@ test("merge action confirms, forces squash with an empty message body, and remov
     records: { "acme/api#1": { status: "next_up", blockedBy: "", notes: "keep", tags: [], modifiedAt: 1 } },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "clean" }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false, merge: "clean" }]
     },
     detailCache: {}
   });
@@ -2560,7 +2560,7 @@ test("close action accepts an optional comment and removes the closed PR", async
     records: {},
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false, merge: "blocked" }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false, merge: "blocked" }]
     },
     detailCache: {}
   });
@@ -2615,7 +2615,7 @@ test("personal status can be changed directly from a PR row", async () => {
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });
@@ -2686,7 +2686,7 @@ test("awaited export flush includes the latest pending note", async () => {
     },
     openListCache: {
       updatedAt: 1,
-      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.toasttab.com/acme/api/pull/1", draft: false }]
+      items: [{ key: "acme/api#1", owner: "acme", repo: "api", number: 1, title: "One", url: "https://github.com/acme/api/pull/1", draft: false }]
     },
     detailCache: {}
   });

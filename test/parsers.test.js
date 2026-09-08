@@ -54,7 +54,7 @@ test("parsePullListDocument reads Toast Enterprise review and check signals", ()
     ]
   );
   assert.equal(result.items[0].headSha, sha);
-  assert.equal(result.items[0].checksUrl, `https://github.toasttab.com/acme/api/commit/${sha}/status-details?popover=true`);
+  assert.equal(result.items[0].checksUrl, `https://github.com/acme/api/commit/${sha}/status-details?popover=true`);
 });
 
 test("parsePullListDocument trusts the green rollup wrapper when successful checks exclude skipped checks", () => {
@@ -140,8 +140,8 @@ test("parsePullListDocument does not infer draft state from the PR title", () =>
 
 test("fetchOpenPrs follows unique same-origin pagination links", async () => {
   const pages = new Map([
-    ["https://github.toasttab.com/pulls?q=is%3Aopen+is%3Apr+archived%3Afalse+author%3A%40me", await fixture("pulls-page1.html")],
-    ["https://github.toasttab.com/pulls?page=2", await fixture("pulls-page2.html")]
+    ["https://github.com/pulls?q=is%3Aopen+is%3Apr+archived%3Afalse+author%3A%40me", await fixture("pulls-page1.html")],
+    ["https://github.com/pulls?page=2", await fixture("pulls-page2.html")]
   ]);
   const summaries = await fetchOpenPrs({
     fetchImpl: async (url) => ({ ok: true, text: async () => pages.get(url) }),
@@ -151,12 +151,12 @@ test("fetchOpenPrs follows unique same-origin pagination links", async () => {
 });
 
 test("parsePrUrl parses stable key", () => {
-  assert.deepEqual(parsePrUrl("https://github.toasttab.com/acme/api/pull/12/files"), {
+  assert.deepEqual(parsePrUrl("https://github.com/acme/api/pull/12/files"), {
     owner: "acme",
     repo: "api",
     number: 12,
     key: "acme/api#12",
-    url: "https://github.toasttab.com/acme/api/pull/12"
+    url: "https://github.com/acme/api/pull/12"
   });
 });
 
@@ -189,7 +189,7 @@ test("detail parser extracts creation time and Jira references from the PR page"
     <a href="https://toasttab.atlassian.net/browse/PLAT-7">Platform work for PLAT-7</a>
     <a href="https://example.com/not-jira">ENG-42</a>
     <a href="https://toasttab.atlassian.net/browse/OPS-9">ENG-42</a>
-  `, "https://github.toasttab.com/acme/api/pull/12"));
+  `, "https://github.com/acme/api/pull/12"));
 
   assert.equal(detail.createdAt, "2026-08-04T14:30:00Z");
   assert.equal(detail.jiraBaseUrl, "https://toasttab.atlassian.net/browse/");
@@ -204,7 +204,7 @@ test("detail parser ignores jira-looking labels when the href is unrelated or mi
     <a href="https://example.com/not-jira">ENG-42</a>
     <a href="https://toasttab.atlassian.net/browse/OPS-9">ENG-42</a>
     <a href="javascript:alert('xss')">SEC-1</a>
-  `, "https://github.toasttab.com/acme/api/pull/12"));
+  `, "https://github.com/acme/api/pull/12"));
 
   assert.equal(detail.jiraBaseUrl, undefined);
   assert.equal(detail.jiraReferences, undefined);
@@ -230,7 +230,7 @@ test("detail parser lets the current merge box override a stale embedded failure
       <div class="branch-action-item"><h3 class="status-heading">All checks have passed</h3><span class="status-meta">7 successful checks</span></div>
       <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
     </div>
-  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"));
+  `, "https://github.com/toasttab/apex-copilot/pull/30"));
 
   assert.deepEqual(detail, {
     review: "required",
@@ -273,7 +273,7 @@ test("detail parser ignores unrelated embedded check rollups for the current PR"
         "payload":{"pullRequestsLayoutRoute":{"pullRequest":{"number":30,"reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":{"state":"SUCCESS"},"mergeStateStatus":"BLOCKED"}}}
       }
     </script>
-  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"));
+  `, "https://github.com/toasttab/apex-copilot/pull/30"));
 
   assert.equal(detail.review, "required");
   assert.equal(detail.checks, "passing");
@@ -330,7 +330,7 @@ test("detail parser stays unknown for historical timeline text", async () => {
 });
 
 test("detail parser reads GitHub's current embedded draft and reviewer sidebar", async () => {
-  const doc = parseHtml(await fixture("detail-current-github.html"), "https://github.toasttab.com/acme/api/pull/12");
+  const doc = parseHtml(await fixture("detail-current-github.html"), "https://github.com/acme/api/pull/12");
   assert.deepEqual(parsePrDetailDocument(doc), {
     review: "changes_requested",
     checks: "unknown",
@@ -338,8 +338,8 @@ test("detail parser reads GitHub's current embedded draft and reviewer sidebar",
     draft: true
   });
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"),
-    "https://github.toasttab.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
+    findDeferredStatusEndpoint(doc, "https://github.com/acme/api/pull/12"),
+    "https://github.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
   );
 });
 
@@ -461,8 +461,8 @@ test("semantic DOM merge parsing prefers conflict text over generic can-merge ph
 });
 
 test("findDeferredStatusEndpoint returns only same-origin current-status URLs from HTML", async () => {
-  const doc = parseHtml(await fixture("detail-history-only.html"), "https://github.toasttab.com/acme/api/pull/12");
-  assert.equal(findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"), "https://github.toasttab.com/acme/api/pull/12/status");
+  const doc = parseHtml(await fixture("detail-history-only.html"), "https://github.com/acme/api/pull/12");
+  assert.equal(findDeferredStatusEndpoint(doc, "https://github.com/acme/api/pull/12"), "https://github.com/acme/api/pull/12/status");
   assert.equal(isSameOriginGitHubUrl("https://evil.example/acme/api/pull/12/status"), false);
 });
 
@@ -473,12 +473,12 @@ test("findDeferredStatusEndpoint scopes to the current PR and prefers the curren
     <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=old111"></div>
     <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=abc123"></div>
     <script>
-      window.__seed = "https://github.toasttab.com/acme/other/pull/12/partials/commit_status_icon?oid=abc123";
+      window.__seed = "https://github.com/acme/other/pull/12/partials/commit_status_icon?oid=abc123";
     </script>
-  `, "https://github.toasttab.com/acme/api/pull/12");
+  `, "https://github.com/acme/api/pull/12");
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12"),
-    "https://github.toasttab.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
+    findDeferredStatusEndpoint(doc, "https://github.com/acme/api/pull/12"),
+    "https://github.com/acme/api/pull/12/partials/commit_status_icon?oid=abc123"
   );
 });
 
@@ -487,10 +487,10 @@ test("findDeferredStatusEndpoint uses the supplied head when merge-form metadata
   const doc = parseHtml(`
     <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=old111"></div>
     <div data-url="/acme/api/pull/12/partials/commit_status_icon?oid=${sha}"></div>
-  `, "https://github.toasttab.com/acme/api/pull/12");
+  `, "https://github.com/acme/api/pull/12");
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/acme/api/pull/12", sha),
-    `https://github.toasttab.com/acme/api/pull/12/partials/commit_status_icon?oid=${sha}`
+    findDeferredStatusEndpoint(doc, "https://github.com/acme/api/pull/12", sha),
+    `https://github.com/acme/api/pull/12/partials/commit_status_icon?oid=${sha}`
   );
 });
 
@@ -504,10 +504,10 @@ test("findDeferredStatusEndpoint picks the newest commit's status icon when no h
     <div data-url="/toasttab/apex-copilot/pull/30/partials/title"></div>
     <div data-url="/toasttab/apex-copilot/pull/30/partials/body"></div>
     <a href="/toasttab/apex-copilot/pull/30/checks"></a>
-  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30");
+  `, "https://github.com/toasttab/apex-copilot/pull/30");
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"),
-    "https://github.toasttab.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
+    findDeferredStatusEndpoint(doc, "https://github.com/toasttab/apex-copilot/pull/30"),
+    "https://github.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
   );
 });
 
@@ -518,7 +518,7 @@ test("findDeferredStatusEndpoint on a React-shell PR page parses all-unknown det
     <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=ed059b18"></div>
     <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"></div>
     <div class="commit-build-statuses"><span class="Skeleton d-inline-block"></span></div>
-  `, "https://github.toasttab.com/toasttab/apex-copilot/pull/30");
+  `, "https://github.com/toasttab/apex-copilot/pull/30");
   assert.deepEqual(parsePrDetailDocument(doc), {
     review: "unknown",
     checks: "unknown",
@@ -526,8 +526,8 @@ test("findDeferredStatusEndpoint on a React-shell PR page parses all-unknown det
     draft: undefined
   });
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.toasttab.com/toasttab/apex-copilot/pull/30"),
-    "https://github.toasttab.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
+    findDeferredStatusEndpoint(doc, "https://github.com/toasttab/apex-copilot/pull/30"),
+    "https://github.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
   );
 });
 
@@ -540,18 +540,18 @@ test("ensureTrackerNav targets the pulls nav and not unrelated navs", async () =
   assert.equal(trackerLink.getAttribute("href"), "/pulls#pr-tracker");
 });
 
-test("tracker uses the valid Toast GitHub Enterprise pulls route", () => {
+test("tracker uses the valid GitHub Enterprise pulls route", () => {
   assert.equal(trackerUrl(), "/pulls#pr-tracker");
-  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox#pr-tracker"), true);
-  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox?pr_tracker=1"), true);
-  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls?pr_tracker=1"), true);
-  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/inbox"), false);
-  assert.equal(isTrackerRoute("https://github.toasttab.com/pulls/assigned#pr-tracker"), false);
+  assert.equal(isTrackerRoute("https://github.com/pulls/inbox#pr-tracker"), true);
+  assert.equal(isTrackerRoute("https://github.com/pulls/inbox?pr_tracker=1"), true);
+  assert.equal(isTrackerRoute("https://github.com/pulls?pr_tracker=1"), true);
+  assert.equal(isTrackerRoute("https://github.com/pulls/inbox"), false);
+  assert.equal(isTrackerRoute("https://github.com/pulls/assigned#pr-tracker"), false);
 });
 
-test("authored PR discovery uses the Toast GitHub Enterprise pulls route", () => {
+test("authored PR discovery uses the GitHub Enterprise pulls route", () => {
   const url = new URL(trackerSearchUrl());
-  assert.equal(url.origin, "https://github.toasttab.com");
+  assert.equal(url.origin, "https://github.com");
   assert.equal(url.pathname, "/pulls");
   assert.match(url.searchParams.get("q"), /author:@me/);
   assert.match(url.searchParams.get("q"), /archived:false/);
