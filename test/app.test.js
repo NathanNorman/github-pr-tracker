@@ -196,7 +196,7 @@ test("list rows render an age badge and Jira references as links", async () => {
         draft: false,
         createdAt: createdAt.toISOString(),
         jiraReferences: [
-          { key: "ENG-42", url: "https://toasttab.atlassian.net/browse/ENG-42" }
+          { key: "ENG-42", url: "https://example.atlassian.net/browse/ENG-42" }
         ]
       }]
     },
@@ -214,7 +214,7 @@ test("list rows render an age badge and Jira references as links", async () => {
             <div class="gh-header-meta">
               <relative-time datetime="${createdAt.toISOString()}"></relative-time>
             </div>
-            <a href="https://toasttab.atlassian.net/browse/ENG-42">ENG-42</a>
+            <a href="https://example.atlassian.net/browse/ENG-42">ENG-42</a>
           `,
       headers: { get: () => "text/html" }
     })
@@ -228,14 +228,14 @@ test("list rows render an age badge and Jira references as links", async () => {
 
   const rowJiraLink = shadow.querySelector(".pr-row .jira-link");
   assert.equal(rowJiraLink?.textContent, "ENG-42");
-  assert.equal(rowJiraLink?.getAttribute("href"), "https://toasttab.atlassian.net/browse/ENG-42");
+  assert.equal(rowJiraLink?.getAttribute("href"), "https://example.atlassian.net/browse/ENG-42");
   assert.equal(rowJiraLink?.getAttribute("target"), "_blank");
   assert.equal(rowJiraLink?.getAttribute("rel"), "noreferrer");
 
   shadow.querySelector(".pr-row-select").click();
   const drawerJiraLink = shadow.querySelector(".drawer-identity .jira-link");
   assert.equal(drawerJiraLink?.textContent, "ENG-42");
-  assert.equal(drawerJiraLink?.getAttribute("href"), "https://toasttab.atlassian.net/browse/ENG-42");
+  assert.equal(drawerJiraLink?.getAttribute("href"), "https://example.atlassian.net/browse/ENG-42");
 });
 
 test("unsafe imported jira urls do not render as links", async () => {
@@ -1619,9 +1619,9 @@ test("primary repository sorting renders separate sections and secondary updated
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Archive", url: "https://github.com/toasttab/toast-archiving/pull/3", updatedAt: 30 },
-        { key: "toasttab/toast-analytics#1", owner: "toasttab", repo: "toast-analytics", number: 1, title: "Older", url: "https://github.com/toasttab/toast-analytics/pull/1", updatedAt: 10 },
-        { key: "toasttab/toast-analytics#2", owner: "toasttab", repo: "toast-analytics", number: 2, title: "Newer", url: "https://github.com/toasttab/toast-analytics/pull/2", updatedAt: 20 }
+        { key: "acme/example-archiving#3", owner: "acme", repo: "example-archiving", number: 3, title: "Archive", url: "https://github.com/acme/example-archiving/pull/3", updatedAt: 30 },
+        { key: "acme/example-analytics#1", owner: "acme", repo: "example-analytics", number: 1, title: "Older", url: "https://github.com/acme/example-analytics/pull/1", updatedAt: 10 },
+        { key: "acme/example-analytics#2", owner: "acme", repo: "example-analytics", number: 2, title: "Newer", url: "https://github.com/acme/example-analytics/pull/2", updatedAt: 20 }
       ]
     },
     detailCache: {}
@@ -1639,13 +1639,13 @@ test("primary repository sorting renders separate sections and secondary updated
   const groups = [...shadow.querySelectorAll(".pr-group")];
 
   assert.deepEqual(groups.map((group) => group.querySelector(".pr-group-label").textContent), [
-    "toast-analytics",
-    "toast-archiving"
+    "example-analytics",
+    "example-archiving"
   ]);
   assert.equal(groups[0].querySelector(".pr-group-count").textContent, "2");
   assert.deepEqual([...groups[0].querySelectorAll(".pr-row")].map((row) => row.dataset.prKey), [
-    "toasttab/toast-analytics#2",
-    "toasttab/toast-analytics#1"
+    "acme/example-analytics#2",
+    "acme/example-analytics#1"
   ]);
   assert.match(shadow.querySelector(".sort-summary").textContent, /Group: Repository/);
 });
@@ -1655,9 +1655,9 @@ test("group sections collapse to only the header row and survive unrelated reren
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {
-      "toasttab/apex-copilot#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
-      "toasttab/apex-copilot#2": { status: "waiting", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
-      "toasttab/toast-archiving#3": { status: "blocked", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+      "acme/example-app#1": { status: "unsorted", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
+      "acme/example-app#2": { status: "waiting", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
+      "acme/example-archiving#3": { status: "blocked", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
     },
     sortPreferences: {
       primary: { field: "repository", direction: "asc" },
@@ -1666,9 +1666,9 @@ test("group sections collapse to only the header row and survive unrelated reren
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/apex-copilot#2", owner: "toasttab", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.com/toasttab/apex-copilot/pull/2", updatedAt: 10 },
-        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Three", url: "https://github.com/toasttab/toast-archiving/pull/3", updatedAt: 30 }
+        { key: "acme/example-app#1", owner: "acme", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/acme/example-app/pull/1", updatedAt: 20 },
+        { key: "acme/example-app#2", owner: "acme", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.com/acme/example-app/pull/2", updatedAt: 10 },
+        { key: "acme/example-archiving#3", owner: "acme", repo: "example-archiving", number: 3, title: "Three", url: "https://github.com/acme/example-archiving/pull/3", updatedAt: 30 }
       ]
     },
     detailCache: {}
@@ -1685,7 +1685,7 @@ test("group sections collapse to only the header row and survive unrelated reren
   const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
   const groupsBefore = [...shadow.querySelectorAll(".pr-group")];
   const apexGroupBefore = groupsBefore.find((group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot");
-  const archivingGroupBefore = groupsBefore.find((group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving");
+  const archivingGroupBefore = groupsBefore.find((group) => group.querySelector(".pr-group-label")?.textContent === "example-archiving");
   const apexToggleBefore = apexGroupBefore.querySelector(".pr-group-toggle");
 
   assert.equal(apexToggleBefore.getAttribute("aria-expanded"), "true");
@@ -1698,7 +1698,7 @@ test("group sections collapse to only the header row and survive unrelated reren
 
   const groupsCollapsed = [...shadow.querySelectorAll(".pr-group")];
   const apexGroupCollapsed = groupsCollapsed.find((group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot");
-  const archivingGroupCollapsed = groupsCollapsed.find((group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving");
+  const archivingGroupCollapsed = groupsCollapsed.find((group) => group.querySelector(".pr-group-label")?.textContent === "example-archiving");
   const apexToggleCollapsed = apexGroupCollapsed.querySelector(".pr-group-toggle");
   const apexRowsCollapsed = apexGroupCollapsed.querySelector(".pr-group-rows");
 
@@ -1710,7 +1710,7 @@ test("group sections collapse to only the header row and survive unrelated reren
   assert.equal(archivingGroupCollapsed.querySelector(".pr-group-rows").hidden, false);
   assert.equal(archivingGroupCollapsed.querySelectorAll(".pr-row").length, 1);
 
-  await storage.upsertRecord("toasttab/toast-archiving#3", { notes: "rerender" }, 2);
+  await storage.upsertRecord("acme/example-archiving#3", { notes: "rerender" }, 2);
 
   const apexGroupAfterRerender = [...shadow.querySelectorAll(".pr-group")].find(
     (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
@@ -1725,8 +1725,8 @@ test("group sections collapse to only the header row and survive unrelated reren
   assert.equal(apexGroupExpandedAgain.querySelector(".pr-group-toggle").getAttribute("aria-expanded"), "true");
   assert.equal(apexGroupExpandedAgain.querySelector(".pr-group-rows").hidden, false);
   assert.deepEqual([...apexGroupExpandedAgain.querySelectorAll(".pr-row")].map((row) => row.dataset.prKey), [
-    "toasttab/apex-copilot#1",
-    "toasttab/apex-copilot#2"
+    "acme/example-app#1",
+    "acme/example-app#2"
   ]);
 });
 
@@ -1735,9 +1735,9 @@ test("collapsed group state is isolated by grouping field and restored when swit
   const storage = makeStorage({
     accountLogin: "octocat",
     records: {
-      "toasttab/apex-copilot#1": { status: "blocked", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
-      "toasttab/apex-copilot#2": { status: "blocked", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
-      "toasttab/toast-archiving#3": { status: "waiting", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
+      "acme/example-app#1": { status: "blocked", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
+      "acme/example-app#2": { status: "blocked", blockedBy: "", notes: "", tags: [], modifiedAt: 1 },
+      "acme/example-archiving#3": { status: "waiting", blockedBy: "", notes: "", tags: [], modifiedAt: 1 }
     },
     sortPreferences: {
       primary: { field: "repository", direction: "asc" },
@@ -1746,9 +1746,9 @@ test("collapsed group state is isolated by grouping field and restored when swit
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/apex-copilot#2", owner: "toasttab", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.com/toasttab/apex-copilot/pull/2", updatedAt: 10 },
-        { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Three", url: "https://github.com/toasttab/toast-archiving/pull/3", updatedAt: 30 }
+        { key: "acme/example-app#1", owner: "acme", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/acme/example-app/pull/1", updatedAt: 20 },
+        { key: "acme/example-app#2", owner: "acme", repo: "apex-copilot", number: 2, title: "Two", url: "https://github.com/acme/example-app/pull/2", updatedAt: 10 },
+        { key: "acme/example-archiving#3", owner: "acme", repo: "example-archiving", number: 3, title: "Three", url: "https://github.com/acme/example-archiving/pull/3", updatedAt: 30 }
       ]
     },
     detailCache: {}
@@ -1806,8 +1806,8 @@ test("collapsed groups persist across app reloads and expansion removes only the
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+        { key: "acme/example-app#1", owner: "acme", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/acme/example-app/pull/1", updatedAt: 20 },
+        { key: "acme/example-archiving#2", owner: "acme", repo: "example-archiving", number: 2, title: "Two", url: "https://github.com/acme/example-archiving/pull/2", updatedAt: 10 }
       ]
     },
     detailCache: {},
@@ -1827,15 +1827,15 @@ test("collapsed groups persist across app reloads and expansion removes only the
     (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
   );
   const archivingGroup1 = [...shadow.querySelectorAll(".pr-group")].find(
-    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+    (group) => group.querySelector(".pr-group-label")?.textContent === "example-archiving"
   );
 
   apexGroup1.querySelector(".pr-group-toggle").click();
   archivingGroup1.querySelector(".pr-group-toggle").click();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(storage.getEnvelope().collapsedGroups, [
-    "repository::repository:toasttab/apex-copilot",
-    "repository::repository:toasttab/toast-archiving"
+    "repository::repository:acme/example-app",
+    "repository::repository:acme/example-archiving"
   ]);
 
   const dom2 = makeDom();
@@ -1853,7 +1853,7 @@ test("collapsed groups persist across app reloads and expansion removes only the
     (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
   );
   let archivingGroup2 = [...shadow.querySelectorAll(".pr-group")].find(
-    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+    (group) => group.querySelector(".pr-group-label")?.textContent === "example-archiving"
   );
   assert.equal(apexGroup2.querySelector(".pr-group-rows").hidden, true);
   assert.equal(archivingGroup2.querySelector(".pr-group-rows").hidden, true);
@@ -1861,7 +1861,7 @@ test("collapsed groups persist across app reloads and expansion removes only the
   apexGroup2.querySelector(".pr-group-toggle").click();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(storage.getEnvelope().collapsedGroups, [
-    "repository::repository:toasttab/toast-archiving"
+    "repository::repository:acme/example-archiving"
   ]);
 
   const dom3 = makeDom();
@@ -1878,7 +1878,7 @@ test("collapsed groups persist across app reloads and expansion removes only the
     (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
   );
   archivingGroup2 = [...shadow.querySelectorAll(".pr-group")].find(
-    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+    (group) => group.querySelector(".pr-group-label")?.textContent === "example-archiving"
   );
   assert.equal(apexGroup2.querySelector(".pr-group-rows").hidden, false);
   assert.equal(archivingGroup2.querySelector(".pr-group-rows").hidden, true);
@@ -1896,8 +1896,8 @@ test("remote collapsed-group storage updates rerender and preserve later toggles
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+        { key: "acme/example-app#1", owner: "acme", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/acme/example-app/pull/1", updatedAt: 20 },
+        { key: "acme/example-archiving#2", owner: "acme", repo: "example-archiving", number: 2, title: "Two", url: "https://github.com/acme/example-archiving/pull/2", updatedAt: 10 }
       ]
     },
     detailCache: {},
@@ -1913,7 +1913,7 @@ test("remote collapsed-group storage updates rerender and preserve later toggles
 
   await app.init();
   const shadow = dom.window.document.querySelector("#tm-pr-tracker-root").shadowRoot;
-  await storage.updateCollapsedGroups(["repository::repository:toasttab/apex-copilot"]);
+  await storage.updateCollapsedGroups(["repository::repository:acme/example-app"]);
 
   let apexGroup = [...shadow.querySelectorAll(".pr-group")].find(
     (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
@@ -1925,7 +1925,7 @@ test("remote collapsed-group storage updates rerender and preserve later toggles
   assert.deepEqual(storage.getEnvelope().collapsedGroups, []);
 
   const archivingGroup = [...shadow.querySelectorAll(".pr-group")].find(
-    (group) => group.querySelector(".pr-group-label")?.textContent === "toast-archiving"
+    (group) => group.querySelector(".pr-group-label")?.textContent === "example-archiving"
   );
   archivingGroup.querySelector(".pr-group-toggle").click();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1934,7 +1934,7 @@ test("remote collapsed-group storage updates rerender and preserve later toggles
     (group) => group.querySelector(".pr-group-label")?.textContent === "apex-copilot"
   );
   assert.equal(apexGroup.querySelector(".pr-group-rows").hidden, false);
-  assert.deepEqual(storage.getEnvelope().collapsedGroups, ["repository::repository:toasttab/toast-archiving"]);
+  assert.deepEqual(storage.getEnvelope().collapsedGroups, ["repository::repository:acme/example-archiving"]);
 });
 
 test("failed collapsed-group persistence rolls back after an optimistic toggle and leaves the app renderable", async () => {
@@ -1949,8 +1949,8 @@ test("failed collapsed-group persistence rolls back after an optimistic toggle a
     openListCache: {
       updatedAt: 1,
       items: [
-        { key: "toasttab/apex-copilot#1", owner: "toasttab", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/toasttab/apex-copilot/pull/1", updatedAt: 20 },
-        { key: "toasttab/toast-archiving#2", owner: "toasttab", repo: "toast-archiving", number: 2, title: "Two", url: "https://github.com/toasttab/toast-archiving/pull/2", updatedAt: 10 }
+        { key: "acme/example-app#1", owner: "acme", repo: "apex-copilot", number: 1, title: "One", url: "https://github.com/acme/example-app/pull/1", updatedAt: 20 },
+        { key: "acme/example-archiving#2", owner: "acme", repo: "example-archiving", number: 2, title: "Two", url: "https://github.com/acme/example-archiving/pull/2", updatedAt: 10 }
       ]
     },
     detailCache: {},

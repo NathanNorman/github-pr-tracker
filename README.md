@@ -33,7 +33,7 @@ Fallback import steps:
 - `Show completed` reveals `done` items without mixing them into the default active views.
 - Click a private tag to filter by it.
 - Use the compact `Filter` menu to hide draft PRs or narrow the list to one repository, review state, and checks state. Active filters compose with search, personal status, private tags, and the done-item setting; `Clear filters` resets the structured filter menu.
-- Use the compact `Sort` menu to choose a primary group and an optional secondary order within each group. Repository grouping creates separate sections such as `toast-analytics` and `toast-archiving`; status, update timeframe, review, checks, title initial, and PR-number ranges can also be used as groups.
+- Use the compact `Sort` menu to choose a primary group and an optional secondary order within each group. Repository grouping creates separate sections such as `example-analytics` and `example-archiving`; status, update timeframe, review, checks, title initial, and PR-number ranges can also be used as groups.
 - Each grouped section has a chevron toggle in its header. Collapse hides every PR row in that section while keeping the header and item count visible, and each grouping mode keeps its own saved collapse state across page reloads.
 - Grouping defaults to newest update timeframe first, then repository within each section. Filter, sort, and grouped-section collapse selections are saved locally for the next visit.
 - Press `Escape` or click outside to close Filter, Sort, Backup, or the personal PR panel.

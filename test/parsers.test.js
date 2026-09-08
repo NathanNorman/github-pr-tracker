@@ -185,24 +185,24 @@ test("detail parser extracts creation time and Jira references from the PR page"
     <div class="gh-header-meta">
       <relative-time datetime="2026-08-04T14:30:00Z"></relative-time>
     </div>
-    <a href="https://toasttab.atlassian.net/browse/ENG-42">ENG-42</a>
-    <a href="https://toasttab.atlassian.net/browse/PLAT-7">Platform work for PLAT-7</a>
+    <a href="https://example.atlassian.net/browse/ENG-42">ENG-42</a>
+    <a href="https://example.atlassian.net/browse/PLAT-7">Platform work for PLAT-7</a>
     <a href="https://example.com/not-jira">ENG-42</a>
-    <a href="https://toasttab.atlassian.net/browse/OPS-9">ENG-42</a>
+    <a href="https://example.atlassian.net/browse/OPS-9">ENG-42</a>
   `, "https://github.com/acme/api/pull/12"));
 
   assert.equal(detail.createdAt, "2026-08-04T14:30:00Z");
-  assert.equal(detail.jiraBaseUrl, "https://toasttab.atlassian.net/browse/");
+  assert.equal(detail.jiraBaseUrl, "https://example.atlassian.net/browse/");
   assert.deepEqual(detail.jiraReferences, [
-    { key: "ENG-42", url: "https://toasttab.atlassian.net/browse/ENG-42" },
-    { key: "PLAT-7", url: "https://toasttab.atlassian.net/browse/PLAT-7" }
+    { key: "ENG-42", url: "https://example.atlassian.net/browse/ENG-42" },
+    { key: "PLAT-7", url: "https://example.atlassian.net/browse/PLAT-7" }
   ]);
 });
 
 test("detail parser ignores jira-looking labels when the href is unrelated or mismatched", () => {
   const detail = parsePrDetailDocument(parseHtml(`
     <a href="https://example.com/not-jira">ENG-42</a>
-    <a href="https://toasttab.atlassian.net/browse/OPS-9">ENG-42</a>
+    <a href="https://example.atlassian.net/browse/OPS-9">ENG-42</a>
     <a href="javascript:alert('xss')">SEC-1</a>
   `, "https://github.com/acme/api/pull/12"));
 
@@ -230,7 +230,7 @@ test("detail parser lets the current merge box override a stale embedded failure
       <div class="branch-action-item"><h3 class="status-heading">All checks have passed</h3><span class="status-meta">7 successful checks</span></div>
       <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
     </div>
-  `, "https://github.com/toasttab/apex-copilot/pull/30"));
+  `, "https://github.com/acme/example-app/pull/30"));
 
   assert.deepEqual(detail, {
     review: "required",
@@ -273,7 +273,7 @@ test("detail parser ignores unrelated embedded check rollups for the current PR"
         "payload":{"pullRequestsLayoutRoute":{"pullRequest":{"number":30,"reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":{"state":"SUCCESS"},"mergeStateStatus":"BLOCKED"}}}
       }
     </script>
-  `, "https://github.com/toasttab/apex-copilot/pull/30"));
+  `, "https://github.com/acme/example-app/pull/30"));
 
   assert.equal(detail.review, "required");
   assert.equal(detail.checks, "passing");
@@ -496,29 +496,29 @@ test("findDeferredStatusEndpoint uses the supplied head when merge-form metadata
 
 test("findDeferredStatusEndpoint picks the newest commit's status icon when no head sha is known", () => {
   const doc = parseHtml(`
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=a9a5d890"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=71d058e3"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=ed059b18"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/reviews/1"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/title"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/body"></div>
-    <a href="/toasttab/apex-copilot/pull/30/checks"></a>
-  `, "https://github.com/toasttab/apex-copilot/pull/30");
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=a9a5d890"></div>
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=71d058e3"></div>
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=ed059b18"></div>
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=36f3e0b6"></div>
+    <div data-url="/acme/example-app/pull/30/partials/reviews/1"></div>
+    <div data-url="/acme/example-app/pull/30/partials/title"></div>
+    <div data-url="/acme/example-app/pull/30/partials/body"></div>
+    <a href="/acme/example-app/pull/30/checks"></a>
+  `, "https://github.com/acme/example-app/pull/30");
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.com/toasttab/apex-copilot/pull/30"),
-    "https://github.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
+    findDeferredStatusEndpoint(doc, "https://github.com/acme/example-app/pull/30"),
+    "https://github.com/acme/example-app/pull/30/partials/commit_status_icon?oid=36f3e0b6"
   );
 });
 
 test("findDeferredStatusEndpoint on a React-shell PR page parses all-unknown detail but selects the newest deferred commit status", () => {
   const doc = parseHtml(`
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=a9a5d890"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=71d058e3"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=ed059b18"></div>
-    <div data-url="/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"></div>
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=a9a5d890"></div>
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=71d058e3"></div>
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=ed059b18"></div>
+    <div data-url="/acme/example-app/pull/30/partials/commit_status_icon?oid=36f3e0b6"></div>
     <div class="commit-build-statuses"><span class="Skeleton d-inline-block"></span></div>
-  `, "https://github.com/toasttab/apex-copilot/pull/30");
+  `, "https://github.com/acme/example-app/pull/30");
   assert.deepEqual(parsePrDetailDocument(doc), {
     review: "unknown",
     checks: "unknown",
@@ -526,8 +526,8 @@ test("findDeferredStatusEndpoint on a React-shell PR page parses all-unknown det
     draft: undefined
   });
   assert.equal(
-    findDeferredStatusEndpoint(doc, "https://github.com/toasttab/apex-copilot/pull/30"),
-    "https://github.com/toasttab/apex-copilot/pull/30/partials/commit_status_icon?oid=36f3e0b6"
+    findDeferredStatusEndpoint(doc, "https://github.com/acme/example-app/pull/30"),
+    "https://github.com/acme/example-app/pull/30/partials/commit_status_icon?oid=36f3e0b6"
   );
 });
 
@@ -555,5 +555,5 @@ test("authored PR discovery uses the GitHub Enterprise pulls route", () => {
   assert.equal(url.pathname, "/pulls");
   assert.match(url.searchParams.get("q"), /author:@me/);
   assert.match(url.searchParams.get("q"), /archived:false/);
-  assert.match(new URL(trackerSearchUrl("nathannorman-toast")).searchParams.get("q"), /author:nathannorman-toast/);
+  assert.match(new URL(trackerSearchUrl("example-user")).searchParams.get("q"), /author:example-user/);
 });

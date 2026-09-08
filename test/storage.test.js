@@ -97,14 +97,14 @@ test("normalizeEnvelope namespaces records for account", () => {
 test("normalizeCollapsedGroups trims, deduplicates, and safely ignores malformed values", () => {
   assert.deepEqual(normalizeCollapsedGroups(null), []);
   assert.deepEqual(normalizeCollapsedGroups([
-    " repository:toasttab/apex-copilot ",
+    " repository:acme/example-app ",
     "",
-    "repository:toasttab/apex-copilot",
+    "repository:acme/example-app",
     7,
     {},
     "status:blocked"
   ]), [
-    "repository:toasttab/apex-copilot",
+    "repository:acme/example-app",
     "status:blocked"
   ]);
   const capped = normalizeCollapsedGroups(
@@ -126,7 +126,7 @@ test("createStorage keeps collapsed groups isolated by account-scoped storage ke
     [octocatStorageKey]: {
       accountLogin: "octocat",
       records: {},
-      collapsedGroups: ["repository::repository:toasttab/apex-copilot"]
+      collapsedGroups: ["repository::repository:acme/example-app"]
     },
     [hubotStorageKey]: {
       accountLogin: "hubot",
@@ -140,7 +140,7 @@ test("createStorage keeps collapsed groups isolated by account-scoped storage ke
   assert.equal(octocatStorage.storageKey, octocatStorageKey);
   assert.equal(hubotStorage.storageKey, hubotStorageKey);
   assert.deepEqual((await octocatStorage.load()).collapsedGroups, [
-    "repository::repository:toasttab/apex-copilot"
+    "repository::repository:acme/example-app"
   ]);
   assert.deepEqual((await hubotStorage.load()).collapsedGroups, [
     "status::status:blocked"
@@ -321,23 +321,23 @@ test("updateCollapsedGroups normalizes values and does not mutate the previously
   const initial = {
     accountLogin: "octocat",
     records: {},
-    collapsedGroups: ["repository:toasttab/apex-copilot"]
+    collapsedGroups: ["repository:acme/example-app"]
   };
   const { gm, read } = makeGm(initial);
   const storage = createStorage(gm, "octocat");
   const loaded = await storage.load();
 
   await storage.updateCollapsedGroups([
-    " repository:toasttab/apex-copilot ",
+    " repository:acme/example-app ",
     "status:blocked",
     "",
     "status:blocked"
   ]);
 
-  assert.deepEqual(loaded.collapsedGroups, ["repository:toasttab/apex-copilot"]);
+  assert.deepEqual(loaded.collapsedGroups, ["repository:acme/example-app"]);
   assert.notEqual(read(), loaded);
   assert.deepEqual(read().collapsedGroups, [
-    "repository:toasttab/apex-copilot",
+    "repository:acme/example-app",
     "status:blocked"
   ]);
 });
@@ -355,16 +355,16 @@ test("storage subscriptions normalize remote collapsed-group updates for later t
   emitRemote({
     accountLogin: "octocat",
     records: {},
-    collapsedGroups: ["repository:toasttab/apex-copilot", "", "repository:toasttab/apex-copilot"]
+    collapsedGroups: ["repository:acme/example-app", "", "repository:acme/example-app"]
   });
 
-  assert.deepEqual(notifications.at(-1)?.collapsedGroups, ["repository:toasttab/apex-copilot"]);
+  assert.deepEqual(notifications.at(-1)?.collapsedGroups, ["repository:acme/example-app"]);
   await storage.updateCollapsedGroups([
     ...notifications.at(-1).collapsedGroups,
     "status:blocked"
   ]);
   assert.deepEqual((await storage.load()).collapsedGroups, [
-    "repository:toasttab/apex-copilot",
+    "repository:acme/example-app",
     "status:blocked"
   ]);
 });
@@ -444,9 +444,9 @@ test("sortSummaries supports every exposed field and keeps unknown native states
 
 test("groupSummaries creates repository sections and preserves the secondary order within each section", () => {
   const summaries = [
-    { key: "toasttab/toast-archiving#3", owner: "toasttab", repo: "toast-archiving", number: 3, title: "Archive", updatedAt: 30 },
-    { key: "toasttab/toast-analytics#1", owner: "toasttab", repo: "toast-analytics", number: 1, title: "Older", updatedAt: 10 },
-    { key: "toasttab/toast-analytics#2", owner: "toasttab", repo: "toast-analytics", number: 2, title: "Newer", updatedAt: 20 }
+    { key: "acme/example-archiving#3", owner: "acme", repo: "example-archiving", number: 3, title: "Archive", updatedAt: 30 },
+    { key: "acme/example-analytics#1", owner: "acme", repo: "example-analytics", number: 1, title: "Older", updatedAt: 10 },
+    { key: "acme/example-analytics#2", owner: "acme", repo: "example-analytics", number: 2, title: "Newer", updatedAt: 20 }
   ];
   const sortPreferences = {
     primary: { field: SORT_FIELDS.repository, direction: "asc" },
@@ -456,12 +456,12 @@ test("groupSummaries creates repository sections and preserves the secondary ord
   const groups = groupSummaries({ summaries: sorted, records: {}, sortPreferences });
 
   assert.deepEqual(groups.map((group) => [group.label, group.summaries.length]), [
-    ["toast-analytics", 2],
-    ["toast-archiving", 1]
+    ["example-analytics", 2],
+    ["example-archiving", 1]
   ]);
   assert.deepEqual(groups[0].summaries.map((summary) => summary.key), [
-    "toasttab/toast-analytics#2",
-    "toasttab/toast-analytics#1"
+    "acme/example-analytics#2",
+    "acme/example-analytics#1"
   ]);
 });
 

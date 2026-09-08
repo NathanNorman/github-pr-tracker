@@ -34,7 +34,7 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
   window.fetch = async (url) => ({
     ok: true,
     text: async () => String(url).includes("/pulls?")
-      ? '<!doctype html><html><body><div data-issue-and-pr-hovercards-enabled="true"><a data-hovercard-type="pull_request" href="/toasttab/toast-analytics/pull/1">Analytics update</a></div></body></html>'
+      ? '<!doctype html><html><body><div data-issue-and-pr-hovercards-enabled="true"><a data-hovercard-type="pull_request" href="/acme/example-analytics/pull/1">Analytics update</a></div></body></html>'
       : "<!doctype html><html><body></body></html>",
     headers: { get: () => "text/html" }
   });
@@ -47,14 +47,14 @@ test("built userscript mounts the sorting UI on the Toast tracker route", async 
   assert.equal(host.dataset.trackerVersion, "1.7.7");
   assert.ok(host.shadowRoot.querySelector(".sort-summary"), errors.join("\n"));
   assert.ok(host.shadowRoot.querySelector(".filter-summary"), errors.join("\n"));
-  assert.equal(host.shadowRoot.querySelector(".pr-group-label")?.textContent, "toast-analytics");
+  assert.equal(host.shadowRoot.querySelector(".pr-group-label")?.textContent, "example-analytics");
   assert.deepEqual(errors, []);
 });
 
 test("built userscript keeps a green authored-list current head authoritative over stale PR failure markup", async () => {
   const source = await readFile(new URL("../dist/github-pr-tracker.user.js", import.meta.url), "utf8");
   const headSha = "c90c99a44c02d34e8717d83fa00dab560b218d6d";
-  const prUrl = "https://github.com/toasttab/toast-labor/pull/704";
+  const prUrl = "https://github.com/acme/example-labor/pull/704";
   const requests = [];
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="user-login" content="octocat"></head><body><main><div>Native pulls</div></main></body></html>',
@@ -72,11 +72,11 @@ test("built userscript keeps a green authored-list current head authoritative ov
     records: {},
     openListCache: { updatedAt: 0, items: [] },
     detailCache: {
-      "toasttab/toast-labor#704": {
+      "acme/example-labor#704": {
         updatedAt: Date.now(),
         parserVersion: 9,
         headSha,
-        checksUrl: `https://github.com/toasttab/toast-labor/commit/${headSha}/status-details?popover=true`,
+        checksUrl: `https://github.com/acme/example-labor/commit/${headSha}/status-details?popover=true`,
         detail: { review: "approved", checks: "failing", merge: "blocked", draft: false }
       }
     }
@@ -96,12 +96,12 @@ test("built userscript keeps a green authored-list current head authoritative ov
     if (url.pathname === "/pulls" && url.searchParams.has("q")) {
       return response(`
         <div data-issue-and-pr-hovercards-enabled="true">
-          <a data-hovercard-type="pull_request" href="/toasttab/toast-labor/pull/704">[AAP-490] Preserve restaurant currency in labor cost events</a>
+          <a data-hovercard-type="pull_request" href="/acme/example-labor/pull/704">[AAP-490] Preserve restaurant currency in labor cost events</a>
           <details
             class="commit-build-statuses"
             data-checks-state="passing"
             data-head-sha="${headSha}"
-            data-deferred-details-content-url="/toasttab/toast-labor/commit/${headSha}/status-details?popover=true"
+            data-deferred-details-content-url="/acme/example-labor/commit/${headSha}/status-details?popover=true"
           >
             <summary class="color-fg-success"><svg aria-label="37 / 81 checks OK" class="octicon octicon-check"></svg></summary>
           </details>
@@ -109,8 +109,8 @@ test("built userscript keeps a green authored-list current head authoritative ov
     }
     if (url.href === prUrl) {
       return response(`
-        <div data-url="/toasttab/toast-labor/pull/704/partials/commit_status_icon?oid=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></div>
-        <div data-url="/toasttab/toast-labor/pull/704/partials/commit_status_icon?oid=${headSha}"></div>
+        <div data-url="/acme/example-labor/pull/704/partials/commit_status_icon?oid=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></div>
+        <div data-url="/acme/example-labor/pull/704/partials/commit_status_icon?oid=${headSha}"></div>
         <div class="mergeability-details">
           <div class="branch-action-item"><h3 class="status-heading">Some checks failed</h3></div>
           <div class="branch-action-item"><h3 class="status-heading">Merging is blocked</h3></div>
@@ -125,24 +125,24 @@ test("built userscript keeps a green authored-list current head authoritative ov
   assert.match(source, /^\/\/ @version\s+1\.10\.0$/m);
   window.eval(source);
   await waitFor(
-    () => envelope.detailCache["toasttab/toast-labor#704"]?.detail?.checks === "passing",
+    () => envelope.detailCache["acme/example-labor#704"]?.detail?.checks === "passing",
     "AAP-490 current-head result"
   );
 
   const badge = window.document
     .querySelector("#tm-pr-tracker-root")
-    ?.shadowRoot?.querySelector('.pr-row[data-pr-key="toasttab/toast-labor#704"] [data-kind="checks"]');
+    ?.shadowRoot?.querySelector('.pr-row[data-pr-key="acme/example-labor#704"] [data-kind="checks"]');
   const host = window.document.querySelector("#tm-pr-tracker-root");
-  const row = host?.shadowRoot?.querySelector('.pr-row[data-pr-key="toasttab/toast-labor#704"]');
-  const summary = envelope.openListCache.items.find(({ key }) => key === "toasttab/toast-labor#704");
+  const row = host?.shadowRoot?.querySelector('.pr-row[data-pr-key="acme/example-labor#704"]');
+  const summary = envelope.openListCache.items.find(({ key }) => key === "acme/example-labor#704");
   assert.equal(badge?.dataset.state, "passing");
   assert.equal(badge?.textContent, "Checks passing");
   assert.equal(row?.dataset.checksState, "passing");
   assert.equal(row?.dataset.headSha, headSha);
   assert.equal(summary?.checks, "passing");
   assert.equal(summary?.headSha, headSha);
-  assert.equal(envelope.detailCache["toasttab/toast-labor#704"].headSha, headSha);
-  assert.equal(envelope.detailCache["toasttab/toast-labor#704"].detail.checks, "passing");
+  assert.equal(envelope.detailCache["acme/example-labor#704"].headSha, headSha);
+  assert.equal(envelope.detailCache["acme/example-labor#704"].detail.checks, "passing");
   assert.equal(requests.filter(({ url }) => url === prUrl).length, 1);
   assert.equal(host?.dataset.trackerVersion, "1.7.7");
   assert.deepEqual(
